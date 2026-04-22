@@ -75,15 +75,18 @@ sudo cp AutoDock-Vina-GPU-2-1 /usr/local/bin/vina-gpu
 
 ## 3. 数据预计算（服务器跑一次）
 
+### 3a. Core 数据（v4-minimal / v4-pocket / v4-ultimate 都要）
+
 ```bash
 cd /data/wnk/DLcatalysis4.0
 
-# 3a. 分子图 (CPU, <1 min for 5,990 SMILES)
+# 分子图 w/ 3D 构象 (CPU, ~5-10 min for 5,990 SMILES with RDKit ETKDG+MMFF)
 python scripts/11_precompute_mol_graphs.py \
   --smi_csv data/processed/smi.csv \
   --out data/processed/mol_graphs.pt
+# 如果只要 2D 图（v4-minimal 够用）：加 --no_3d
 
-# 3b. ProtT5 embedding LMDB (GPU, 30-60 min on A100 for 7,100 seqs)
+# ProtT5 embedding LMDB (GPU, 30-60 min on A100 for 7,100 seqs)
 python scripts/12_precompute_prot5_lmdb.py \
   --seq_csv data/processed/seq.csv \
   --output data/processed/seq_prot5.lmdb \
@@ -92,6 +95,33 @@ python scripts/12_precompute_prot5_lmdb.py \
   --max_seq_len 1000 \
   --batch_size 8
 ```
+
+### 3b. v4-ultimate 额外数据（reaction + annotation）
+
+```bash
+# DRFP 反应指纹 (CPU, ~10 min, parallelized with multiprocessing.Pool)
+pip install drfp
+python scripts/17_precompute_drfp.py \
+  --final_data data/processed/final_data.csv \
+  --out data/processed/rxn_drfp.npy \
+  --keys_out data/processed/rxn_drfp_keys.csv \
+  --n_folded 2048
+
+# RXNMapper atom-level reaction center masks (GPU, ~30-60 min on A100)
+pip install rxnmapper
+python scripts/18_precompute_rxnmapper.py \
+  --final_data data/processed/final_data.csv \
+  --smi_csv data/processed/smi.csv \
+  --out data/processed/rxn_center_mask.pt
+
+# InterPro/Pfam/GO annotations (CPU, <1 min)
+python scripts/21_parse_annotations.py \
+  --full_rxn data/processed/dlcat4_v1_full_rxn.csv \
+  --out_pt data/processed/enzyme_annotations.pt \
+  --out_vocab data/processed/annotation_vocabs.json
+```
+
+注：[data/processed/annotation_vocabs.json](data/processed/annotation_vocabs.json) 已经在仓库里（committed），但 `enzyme_annotations.pt` 是大文件（.gitignore 排除），所以**必须在服务器上重跑 21 脚本**。
 
 ---
 
@@ -198,6 +228,31 @@ python train/run_train.py --config config/v4_pocket.yml --cv
 ```
 
 **预期 PCC**：相对 v4-minimal 至少提升 0.05-0.10（结构分支真贡献）。如果没提升，说明 pocket 信号被 sequence branch 已覆盖 —— 走 CatPred 的警示。
+
+## 6b. v4-ultimate（集大成版）训练
+
+先确保 Step 3b 已跑完（DRFP + RXNMapper + annotations）。
+
+```bash
+# Single fold
+python train/run_train.py --config config/v4_ultimate.yml --fold 0
+
+# Full 10-fold CV (~16h on A100)
+python train/run_train.py --config config/v4_ultimate.yml --cv
+```
+
+注：**v4-ultimate 作为 upper-bound 参考**放论文附录；主文的主 claim 靠 `v4-minimal → v4-pocket` 这一步的 ablation，不是 ultimate。
+
+### Ultimate 各分支开关 (ablation 用)
+
+`config/v4_ultimate.yml` 有以下 flag，可独立开关每个新增模态：
+- `use_rxn_drfp: true`    — DRFP 反应指纹分支
+- `use_rxn_center: true`  — RXNMapper 原子级反应中心
+- `use_pocket: true`      — GVP pocket 分支
+- `use_int3d: true`       — 3D cross-attention
+- `use_annot: true`       — InterPro/Pfam/GO 注释 embedding
+- `use_condition: true`   — pH/温度条件感知
+- `use_ec: true`          — EC 4 级 embedding
 
 ---
 

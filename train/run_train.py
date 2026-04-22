@@ -84,6 +84,7 @@ def train_one_fold(config: dict, fold: int, args):
         min_epochs=config["train"]["min_epochs"],
         precision=config["train"].get("precision", "32"),
         gradient_clip_val=1.0,
+        accumulate_grad_batches=config["train"].get("grad_accum", 1),
         callbacks=callbacks,
         logger=logger,
         log_every_n_steps=20,

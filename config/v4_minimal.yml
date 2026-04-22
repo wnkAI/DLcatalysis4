@@ -7,9 +7,9 @@
 
 data:
   data_representer: sequence_molecular
-  train_data_df: data/processed/folds/train_fold0.csv     # 由 split 脚本产出
-  valid_data_df: data/processed/folds/fold_0.csv
-  test_data_df:  data/processed/folds/fold_0.csv
+  train_data_df: data/processed/folds/train_fold0.csv
+  valid_data_df: data/processed/folds/valid_fold0.csv
+  test_data_df:  data/processed/folds/test_fold0.csv
   seq_lmdb:
     lmdb:        data/processed/seq_prot5.lmdb
     map_size:    64424509440             # 60 GB

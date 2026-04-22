@@ -173,10 +173,13 @@ class V4Pocket(pl.LightningModule):
             nn.LeakyReLU(),
             nn.Linear(self.hidden_dim, 1),
         )  # sigmoid applied in forward (so we can set bias explicitly)
-        nn.init.constant_(self.gate_struct[-1].bias, -2.0)  # conservative init
+        # Read conservative init from config (default -2.0); applied twice to
+        # survive the post-init Xavier pass in _init_weights.
+        self._gate_struct_bias = float(config["model"].get("struct", {}).get("gate_init_bias", -2.0))
+        nn.init.constant_(self.gate_struct[-1].bias, self._gate_struct_bias)
 
         self._init_weights()
-        nn.init.constant_(self.gate_struct[-1].bias, -2.0)
+        nn.init.constant_(self.gate_struct[-1].bias, self._gate_struct_bias)
 
     def _init_weights(self):
         prot5_ids = set(id(m) for m in self.prot5_encoder.modules())

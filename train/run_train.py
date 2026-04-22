@@ -31,10 +31,13 @@ sys.path.append(str(PROJECT_ROOT / "src"))
 from util.data_module import Singledataset
 from model.v4_minimal import V4Minimal
 from model.v4_pocket import V4Pocket
+from model.v4_ultimate import V4Ultimate
 
 
 def get_model_class(config):
     name = config["model"].get("model_name", "v4_minimal").lower()
+    if "ultimate" in name:
+        return V4Ultimate
     if "pocket" in name:
         return V4Pocket
     return V4Minimal

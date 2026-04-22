@@ -10,10 +10,12 @@ Strips MSA/Morgan/MolT5/Grover/UniMol from 3.0. Keeps:
 Data contract (CSV):
   DATA_ID, SEQ_ID, SMI_ID, EC_NUMBER, Y_VALUE
 """
+import hashlib
+import json
 import sys
 import pickle
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from collections import defaultdict
 
 import numpy as np
@@ -22,6 +24,10 @@ import torch
 import pytorch_lightning as pl
 import torch_geometric
 from torch_geometric.loader import DataLoader
+
+
+def _rxn_hash(rxn_smi: str) -> str:
+    return "RXN_" + hashlib.sha1(rxn_smi.encode("utf-8")).hexdigest()[:10].upper()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
@@ -85,9 +91,12 @@ class SeqMolComplexData(torch_geometric.data.Data):
             return self.MOL_graph_x.size(0) if hasattr(self, "MOL_graph_x") else 0
         if key == "POCKET_edge_index":
             return self.POCKET_node_s.size(0) if hasattr(self, "POCKET_node_s") else 0
-        if key in ("MOL_graph_x", "MOL_graph_edge_attr", "MOL_graph_num_nodes"):
+        if key in ("MOL_graph_x", "MOL_graph_edge_attr", "MOL_graph_num_nodes",
+                   "MOL_rxn_center"):
             return 0
         if key.startswith("POCKET_"):
+            return 0
+        if key.startswith("RXN_") or key.startswith("ANNOT_") or key.startswith("COND_"):
             return 0
         if key == "EC_ids":
             return 0
@@ -118,8 +127,18 @@ class SeqMolDataset(torch.utils.data.Dataset):
         self.smi_ids  = self.df["SMI_ID"].tolist()
         self.ec_s     = self.df["EC_NUMBER"].tolist()
         self.y_s      = self.df["Y_VALUE"].tolist()
+        # Optional columns for ultimate model
+        self.rxn_smiles = self.df["RXN_SMILES"].tolist() if "RXN_SMILES" in df.columns else [None] * len(df)
+        self.phs        = self.df["PH"].tolist() if "PH" in df.columns else [None] * len(df)
+        self.temps      = self.df["TEMP"].tolist() if "TEMP" in df.columns else [None] * len(df)
 
         self.use_ec = config["model"].get("use_ec", False)
+
+        # Ultimate feature flags
+        self.use_rxn_drfp = config["model"].get("use_rxn_drfp", False)
+        self.use_rxn_center = config["model"].get("use_rxn_center", False)
+        self.use_annot = config["model"].get("use_annot", False)
+        self.use_condition = config["model"].get("use_condition", False)
 
         # ── Sequence LMDB (lazy, per-worker) ──────────────────────────
         self.seq_lmdb_config = SEQ_LMDB_CONFIG(
@@ -147,6 +166,57 @@ class SeqMolDataset(torch.utils.data.Dataset):
         if pocket_path and Path(pocket_path).exists():
             self.pockets = torch.load(pocket_path, weights_only=False)
             print(f"[data] Loaded {len(self.pockets)} pocket graphs")
+
+        # ── DRFP reaction fingerprints ──────────────────────────────
+        self.drfp_by_rxn_id = None
+        self.drfp_dim = config["model"].get("drfp_dim", 2048)
+        if self.use_rxn_drfp:
+            npy_path = config["data"].get("rxn_drfp_npy")
+            keys_path = config["data"].get("rxn_drfp_keys_csv")
+            if npy_path and keys_path and Path(npy_path).exists() and Path(keys_path).exists():
+                fps = np.load(npy_path)
+                keys_df = pd.read_csv(keys_path)
+                self.drfp_by_rxn_id = {rid: fps[i] for i, rid in enumerate(keys_df["RXN_ID"].tolist())}
+                print(f"[data] Loaded {len(self.drfp_by_rxn_id)} DRFP fingerprints (dim={self.drfp_dim})")
+            else:
+                print(f"[warn] DRFP files not found; disabling rxn_drfp")
+                self.use_rxn_drfp = False
+
+        # ── RXNMapper atom-level reaction center mask ───────────────
+        self.rxn_center_by_smi_id = None
+        if self.use_rxn_center:
+            pt_path = config["data"].get("rxn_center_pt")
+            if pt_path and Path(pt_path).exists():
+                self.rxn_center_by_smi_id = torch.load(pt_path, weights_only=False)
+                print(f"[data] Loaded {len(self.rxn_center_by_smi_id)} reaction-center masks")
+            else:
+                print(f"[warn] rxn_center_pt not found; disabling rxn_center")
+                self.use_rxn_center = False
+
+        # ── InterPro / Pfam / GO annotations ────────────────────────
+        self.annotations = None
+        self.annot_vocab = None
+        self.max_fam_per_enzyme = config["model"].get("annot_vocab", {}).get("max_fam_per_enzyme", 16)
+        if self.use_annot:
+            ann_path = config["data"].get("annotations_pt")
+            vocab_path = config["data"].get("annotation_vocab")
+            if ann_path and vocab_path and Path(ann_path).exists() and Path(vocab_path).exists():
+                self.annotations = torch.load(ann_path, weights_only=False)
+                with open(vocab_path, "r", encoding="utf-8") as f:
+                    vocab_lists = json.load(f)
+                # Build ID → index (1..N; 0 reserved for padding/unk)
+                self.annot_vocab = {
+                    "interpro_family": {vid: i + 1 for i, vid in enumerate(vocab_lists["interpro_family"])},
+                    "pfam_family":     {vid: i + 1 for i, vid in enumerate(vocab_lists["pfam_family"])},
+                    "go_term":         {vid: i + 1 for i, vid in enumerate(vocab_lists["go_term"])},
+                }
+                print(f"[data] Loaded annotations for {len(self.annotations)} enzymes "
+                      f"(vocab: ipr={len(self.annot_vocab['interpro_family'])}, "
+                      f"pf={len(self.annot_vocab['pfam_family'])}, "
+                      f"go={len(self.annot_vocab['go_term'])})")
+            else:
+                print(f"[warn] annotation files not found; disabling annot")
+                self.use_annot = False
 
     # ── LMDB helpers ───────────────────────────────────────────────
     def _get_seq_db(self):
@@ -229,6 +299,52 @@ class SeqMolDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data_ids)
 
+    def _load_drfp(self, rxn_smi) -> torch.Tensor:
+        """Return DRFP tensor (drfp_dim,). Zeros if missing."""
+        if not self.use_rxn_drfp or self.drfp_by_rxn_id is None:
+            return torch.zeros(self.drfp_dim, dtype=torch.float32)
+        if not isinstance(rxn_smi, str) or not rxn_smi.strip():
+            return torch.zeros(self.drfp_dim, dtype=torch.float32)
+        fp = self.drfp_by_rxn_id.get(_rxn_hash(rxn_smi))
+        if fp is None:
+            return torch.zeros(self.drfp_dim, dtype=torch.float32)
+        return torch.tensor(fp, dtype=torch.float32)
+
+    def _load_rxn_center(self, smi_id: str, n_atoms: int) -> torch.Tensor:
+        """Return 0/1 mask (n_atoms,) for reaction-center atoms."""
+        if not self.use_rxn_center or self.rxn_center_by_smi_id is None:
+            return torch.zeros(n_atoms, dtype=torch.long)
+        m = self.rxn_center_by_smi_id.get(smi_id)
+        if m is None or len(m) != n_atoms:
+            return torch.zeros(n_atoms, dtype=torch.long)
+        return m.long() if isinstance(m, torch.Tensor) else torch.tensor(m, dtype=torch.long)
+
+    def _load_annot(self, seq_id: str) -> dict:
+        """Return dict with ipr_ids / pf_ids / go_ids — padded to max_fam."""
+        K = self.max_fam_per_enzyme
+        empty = {
+            "ipr_ids": torch.zeros(K, dtype=torch.long),
+            "pf_ids":  torch.zeros(K, dtype=torch.long),
+            "go_ids":  torch.zeros(K, dtype=torch.long),
+        }
+        if not self.use_annot or self.annotations is None:
+            return empty
+        a = self.annotations.get(seq_id)
+        if a is None:
+            return empty
+
+        def _pack(id_set, vocab_map):
+            ids = [vocab_map.get(i, 0) for i in id_set]
+            ids = [x for x in ids if x > 0][:K]
+            ids = ids + [0] * (K - len(ids))
+            return torch.tensor(ids, dtype=torch.long)
+
+        ipr_ids = _pack(a.get("interpro_family_ids", set()) | {d[0] for d in a.get("interpro_domain_ranges", [])},
+                        self.annot_vocab["interpro_family"])
+        pf_ids = _pack(a.get("pfam_family_ids", set()), self.annot_vocab["pfam_family"])
+        go_ids = _pack(a.get("go_term_ids", set()), self.annot_vocab["go_term"])
+        return {"ipr_ids": ipr_ids, "pf_ids": pf_ids, "go_ids": go_ids}
+
     def __getitem__(self, idx: int):
         seq_id = self.seq_ids[idx]
         smi_id = self.smi_ids[idx]
@@ -238,10 +354,33 @@ class SeqMolDataset(torch.utils.data.Dataset):
 
         data = SeqMolComplexData.from_dict(sequence=seq_data, molecular=mol_feat)
 
-        # Pocket fields (optional)
+        # Pocket fields
         pocket_feat = self._load_pocket(seq_id)
         for k, v in pocket_feat.items():
             data["POCKET_" + k] = v
+
+        # Reaction DRFP (fixed size per sample)
+        if self.use_rxn_drfp:
+            data.RXN_drfp = self._load_drfp(self.rxn_smiles[idx]).view(1, -1)  # (1, drfp_dim)
+
+        # Reaction center atom mask (matches substrate GINE atom order)
+        if self.use_rxn_center and "graph_x" in mol_feat:
+            n_atoms = mol_feat["graph_x"].size(0)
+            data.MOL_rxn_center = self._load_rxn_center(smi_id, n_atoms)
+
+        # Annotations (bag-of-words padded to fixed K)
+        if self.use_annot:
+            annot = self._load_annot(seq_id)
+            data.ANNOT_ipr_ids = annot["ipr_ids"].view(1, -1)
+            data.ANNOT_pf_ids  = annot["pf_ids"].view(1, -1)
+            data.ANNOT_go_ids  = annot["go_ids"].view(1, -1)
+
+        # Condition (pH, temp)
+        if self.use_condition:
+            ph = self.phs[idx]
+            temp = self.temps[idx]
+            data.COND_ph = torch.tensor([[float("nan") if pd.isna(ph) else float(ph)]], dtype=torch.float32)
+            data.COND_temp = torch.tensor([[float("nan") if pd.isna(temp) else float(temp)]], dtype=torch.float32)
 
         if self.use_ec:
             ec_ids = _parse_ec_number(self.ec_s[idx])
@@ -249,7 +388,7 @@ class SeqMolDataset(torch.utils.data.Dataset):
 
         data.y = torch.tensor([self.y_s[idx]], dtype=torch.float)
 
-        # Store IDs for ranking losses (string — persists through batching)
+        # Store IDs for ranking losses
         data.SEQ_seq_id = seq_id
         data.MOL_smi_id = smi_id
 

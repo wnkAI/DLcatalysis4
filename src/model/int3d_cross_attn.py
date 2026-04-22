@@ -85,12 +85,19 @@ class Int3DCrossAttnLayer(nn.Module):
     def forward(self, p_tokens, a_tokens,
                 p_mask: torch.Tensor, a_mask: torch.Tensor,
                 xyz_p: Optional[torch.Tensor] = None,
-                xyz_a: Optional[torch.Tensor] = None):
+                xyz_a: Optional[torch.Tensor] = None,
+                xyz_valid_per_sample: Optional[torch.Tensor] = None):
         """
         p_tokens (B, K, D), a_tokens (B, A, D)
         p_mask   (B, K) bool, a_mask (B, A) bool  (True = valid)
         xyz_p    (B, K, 3) float — pocket Cα coords
         xyz_a    (B, A, 3) float — substrate atom coords (optional)
+        xyz_valid_per_sample (B,) bool — per-sample flag; if provided, the
+                                         distance bias is zeroed for samples
+                                         where xyz_a is an invalid (zero)
+                                         fallback. This prevents one valid
+                                         sample enabling fake distance bias
+                                         for invalid zero-coord samples.
         """
         B, K, _ = p_tokens.shape
         _, A, _ = a_tokens.shape
@@ -98,6 +105,11 @@ class Int3DCrossAttnLayer(nn.Module):
         # Distance bias (disabled if no substrate xyz)
         if xyz_p is not None and xyz_a is not None:
             bias = self._dist_bias(xyz_p, xyz_a)  # (B, H, K, A)
+            # Per-sample gating: zero out bias for samples with invalid xyz
+            if xyz_valid_per_sample is not None:
+                v = xyz_valid_per_sample.to(bias.dtype).to(bias.device)
+                v = v.view(B, 1, 1, 1)                      # (B,1,1,1)
+                bias = bias * v
         else:
             bias = None
 
@@ -157,10 +169,12 @@ class Int3DCrossAttn(nn.Module):
         return (tokens * weights).sum(dim=1)
 
     def forward(self, p_tokens, a_tokens, p_mask, a_mask,
-                xyz_p=None, xyz_a=None):
+                xyz_p=None, xyz_a=None,
+                xyz_valid_per_sample=None):
         p, a = p_tokens, a_tokens
         for layer in self.layers:
-            p, a = layer(p, a, p_mask, a_mask, xyz_p, xyz_a)
+            p, a = layer(p, a, p_mask, a_mask, xyz_p, xyz_a,
+                         xyz_valid_per_sample=xyz_valid_per_sample)
         p_pool = self._attn_pool(p, p_mask, self.pool_p)  # (B, D)
         a_pool = self._attn_pool(a, a_mask, self.pool_a)  # (B, D)
         return p, a, p_pool, a_pool

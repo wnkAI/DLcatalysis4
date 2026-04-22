@@ -1,0 +1,400 @@
+from util.tools import set_seed
+
+import pytorch_lightning as pl
+from torch_geometric.transforms import Compose
+from torch_geometric.loader import DataLoader
+from torch_geometric.data import Data
+import torch_geometric
+import torch
+#from torch_scatter import scatter
+
+import numpy as np
+import pandas as pd
+from typing import Dict
+from rdkit import Chem
+ succeeded in 605ms:
+"""
+DLcatalysis 4.0 鈥?v4-pocket (full 4-branch residual with structure).
+
+    pred = y_seq + g_pair * (y_sub + y_int3d) + g_struct * y_struct
+
+    y_seq   : ProtT5 (frozen) -> attn-pool -> MLP head      (enzyme baseline)
+    y_sub   : GINE(4) on substrate SMILES -> graph_pool      (substrate effect)
+    y_int3d : residue tokens 脳 atom tokens with 3D distance  (interaction)
+             cross-attention bias 鈫?pooled 鈫?MLP
+    y_struct: GVP-GNN pocket encoder -> attn-pool -> MLP      (pocket structure)
+    g_pair  : sigmoid(MLP([enz_pool, graph_emb]))
+    g_struct: sigmoid(MLP([enz_pool, graph_emb, pocket_pool, struct_quality]))
+              initial bias = -2.0 so structure starts as conservative residual
+
+Compared to v4_minimal:
+  - Adds GVP pocket branch
+  - Replaces attention-only interaction with 3D-distance-aware cross-attention
+  - Two independent gates (g_pair stays, g_struct is new)
+"""
+import math
+ succeeded in 629ms:
+"""
+DLcatalysis 4.0 鈥?v4-ultimate (闆嗗ぇ鎴愮増).
+
+    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+
+    Branches:
+      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+      y_int3d  : pocket residue 脳 substrate atom cross-attn + 3D RBF  (interaction)
+      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+
+    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb, annot_emb, ec)
+    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality, annot_emb)
+              init bias = -2.0 (conservative)
+    g_annot : sigmoid (annotation strength gate)
+
+Optional pH/temperature conditioning: scalar features concatenated into
+enz_pool branch (EF-UniKP style).
+codex
+Initial read shows one high-risk issue already: `MOL_graph_xyz_valid.any()` is batch-global in both `v4_pocket` and `v4_ultimate`, so a single valid conformer enables distance bias for every sample’s dense atom coordinate tensor. I’m checking whether masks inside `Int3DCrossAttn` prevent or amplify that, and whether all-False masks can produce NaNs.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src'"\\util\\data_module.py | ForEach-Object { '{0,5}: {1}' -f "'$i, $_; $i++ } | Select-Object -First 420' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path src\\model\\int3d_cross_attn.py | Select-Object -First 260" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path src\\model\\substrate_gnn.py | Select-Object -First 180" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content -Path src\\model\\gvp_pocket.py | Select-Object -First 180" in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src'"\\util\\data_module.py | ForEach-Object { '{0,5}: {1}' -f "'$i, $_; $i++ } | Select-Object -First 420'` rejected: blocked by policy
+ succeeded in 495ms:
+"""
+3D-aware cross-attention between pocket residues and substrate atoms.
+
+Usage in model forward:
+    y_int3d = Int3DCrossAttn(pocket_tokens, atom_tokens,
+                             pocket_mask, atom_mask,
+                             pocket_xyz, atom_xyz)
+
+The distance RBF bias injects 3D geometry into attention scores:
+    attn_logits = Q K^T / sqrt(d) + W_dist * rbf(||pocket_i - atom_j||)
+
+When no atom 3D coordinates are available (e.g., substrate only has 2D
+RDKit graph, no docked pose), pass atom_xyz=None 鈫?distance bias is
+disabled automatically (acts as plain 1D residue-atom cross-attention).
+"""
+import math
+from typing import Optional
+
+import torch
+import torch.nn as nn
+ succeeded in 473ms:
+"""
+GVP-GNN pocket encoder for DLcatalysis 4.0.
+
+Lightweight GVP implementation (scalar + vector channels) 鈥?no external
+torch-drug dependency. Consumes the pocket tensors produced by
+scripts/14_extract_pockets.py:
+
+  node_s     (K, 26)   鈥?AA 1hot + pLDDT + 4 flags + min_dist_to_substrate
+  node_v     (K, 2, 3) 鈥?N鈫扖A, C鈫扖A unit vectors
+  edge_index (2, E)    鈥?k-NN CA graph
+  edge_s     (E, 16)   鈥?RBF CA-CA distance
+  edge_v     (E, 1, 3) 鈥?src鈫抎st CA unit vector
+
+Output:
+  pocket_tokens (B, K, D)        鈥?per-residue embeddings for cross-attention
+  pocket_pool   (B, D)           鈥?attention-pooled pocket embedding (for y_struct)
+  pocket_mask   (B, K) bool      鈥?True = valid residue
+"""
+from typing import Tuple
+
+ succeeded in 480ms:
+"""
+Substrate GNN encoder using GINE (GIN with Edge features).
+Encodes molecular graphs into atom-level tokens for cross-attention with enzyme residues.
+"""
+import torch
+import torch.nn as nn
+from torch_geometric.nn import GINEConv, global_mean_pool
+from torch_geometric.utils import to_dense_batch
+
+
+class AtomEncoder(nn.Module):
+    """Encode atom features into hidden_dim via learned embeddings."""
+
+    def __init__(self, hidden_dim):
+        super().__init__()
+        # Atom type (atomic number): 0-119
+        self.atom_type_emb = nn.Embedding(120, 64)
+        # Degree: 0-6
+        self.degree_emb = nn.Embedding(7, 16)
+        # Formal charge: -3 to +3 (offset by 3 -> 0-6)
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src'"\\model\\gvp_pocket.py | ForEach-Object { if("'$i -ge 180 -and $i -le 260){ '"'{0,5}: {1}' -f "'$i, $_ }; $i++ }' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src'"\\model\\gvp_pocket.py | ForEach-Object { if("'$i -ge 180 -and $i -le 260){ '"'{0,5}: {1}' -f "'$i, $_ }; $i++ }'` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \".\" src\\model\\v4_pocket.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \".\" src\\util\\data_module.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \".\" src\\model\\int3d_cross_attn.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \".\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0 succeeded in 391ms:
+1:"""
+2:DLcatalysis 4.0 — v4-pocket (full 4-branch residual with structure).
+4:    pred = y_seq + g_pair * (y_sub + y_int3d) + g_struct * y_struct
+6:    y_seq   : ProtT5 (frozen) -> attn-pool -> MLP head      (enzyme baseline)
+7:    y_sub   : GINE(4) on substrate SMILES -> graph_pool      (substrate effect)
+8:    y_int3d : residue tokens × atom tokens with 3D distance  (interaction)
+9:             cross-attention bias → pooled → MLP
+10:    y_struct: GVP-GNN pocket encoder -> attn-pool -> MLP      (pocket structure)
+11:    g_pair  : sigmoid(MLP([enz_pool, graph_emb]))
+12:    g_struct: sigmoid(MLP([enz_pool, graph_emb, pocket_pool, struct_quality]))
+13:              initial bias = -2.0 so structure starts as conservative residual
+15:Compared to v4_minimal:
+16:  - Adds GVP pocket branch
+17:  - Replaces attention-only interaction with 3D-distance-aware cross-attention
+18:  - Two independent gates (g_pair stays, g_struct is new)
+19:"""
+20:import math
+21:import os
+22:import sys
+23:from datetime import datetime
+ succeeded in 393ms:
+1:"""
+2:DLcatalysis 4.0 data module — minimal version.
+4:Strips MSA/Morgan/MolT5/Grover/UniMol from 3.0. Keeps:
+5:  - ProtT5 precomputed LMDB
+6:  - Substrate molecular graph (PyG Data) cache
+7:  - Optional EC embedding
+8:  - GroupedSampler for same-enzyme / same-substrate ranking
+10:Data contract (CSV):
+11:  DATA_ID, SEQ_ID, SMI_ID, EC_NUMBER, Y_VALUE
+12:"""
+13:import hashlib
+14:import json
+15:import sys
+16:import pickle
+17:from pathlib import Path
+18:from typing import List, Dict, Optional
+19:from collections import defaultdict
+21:import numpy as np
+22:import pandas as pd
+23:import torch
+ succeeded in 385ms:
+1:"""
+2:3D-aware cross-attention between pocket residues and substrate atoms.
+4:Usage in model forward:
+5:    y_int3d = Int3DCrossAttn(pocket_tokens, atom_tokens,
+6:                             pocket_mask, atom_mask,
+7:                             pocket_xyz, atom_xyz)
+9:The distance RBF bias injects 3D geometry into attention scores:
+10:    attn_logits = Q K^T / sqrt(d) + W_dist * rbf(||pocket_i - atom_j||)
+12:When no atom 3D coordinates are available (e.g., substrate only has 2D
+13:RDKit graph, no docked pose), pass atom_xyz=None → distance bias is
+14:disabled automatically (acts as plain 1D residue-atom cross-attention).
+15:"""
+16:import math
+17:from typing import Optional
+19:import torch
+20:import torch.nn as nn
+21:import torch.nn.functional as F
+24:def _gaussian_rbf(dist: torch.Tensor, n_bins: int = 32,
+25:                  min_d: float = 0.0, max_d: float = 20.0,
+26:                  sigma: float = 1.5) -> torch.Tensor:
+ succeeded in 385ms:
+1:"""
+2:DLcatalysis 4.0 — v4-ultimate (集大成版).
+4:    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+6:    Branches:
+7:      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+8:      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+9:      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+10:      y_int3d  : pocket residue × substrate atom cross-attn + 3D RBF  (interaction)
+11:      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+12:      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+14:    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb, annot_emb, ec)
+15:    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality, annot_emb)
+16:              init bias = -2.0 (conservative)
+17:    g_annot : sigmoid (annotation strength gate)
+19:Optional pH/temperature conditioning: scalar features concatenated into
+20:enz_pool branch (EF-UniKP style).
+22:All branches are optional via config flags — model degrades gracefully to
+23:v4-minimal / v4-pocket depending on what modalities are enabled.
+24:"""
+25:import math
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \".\" src\\model\\gvp_pocket.py" in E:\AImodel\DLcatalysis4.0 succeeded in 324ms:
+1:"""
+2:GVP-GNN pocket encoder for DLcatalysis 4.0.
+4:Lightweight GVP implementation (scalar + vector channels) — no external
+5:torch-drug dependency. Consumes the pocket tensors produced by
+6:scripts/14_extract_pockets.py:
+8:  node_s     (K, 26)   — AA 1hot + pLDDT + 4 flags + min_dist_to_substrate
+9:  node_v     (K, 2, 3) — N→CA, C→CA unit vectors
+10:  edge_index (2, E)    — k-NN CA graph
+11:  edge_s     (E, 16)   — RBF CA-CA distance
+12:  edge_v     (E, 1, 3) — src→dst CA unit vector
+14:Output:
+15:  pocket_tokens (B, K, D)        — per-residue embeddings for cross-attention
+16:  pocket_pool   (B, D)           — attention-pooled pocket embedding (for y_struct)
+17:  pocket_mask   (B, K) bool      — True = valid residue
+18:"""
+19:from typing import Tuple
+21:import torch
+22:import torch.nn as nn
+23:import torch.nn.functional as F
+24:from torch_geometric.nn import MessagePassing
+codex
+The PyG increment overrides look mostly correct for the named fields: molecule edge indices are offset by atom count, pocket edge indices by pocket node count, and scalar/feature tensors are held at zero increment. The more serious failures are semantic: missing optional data leaves model branches active, and missing xyz is batch-global instead of per-sample.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path data\\processed -Force | Select-Object Name,Length" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "rxn_drfp_npy|rxn_drfp_keys_csv|rxn_center_pt|annotations_pt|annotation_vocab|pocket_path|mol_graph_path" -S config src train' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \"use_rxn\\|use_pocket\\|use_int3d\\|use_annot\\|use_condition\\|gate_init_bias\\|rxn_drfp\\|rxn_center\\|annotations\\|pocket_path\" config\\v4_ultimate.yml" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \"use_ec\\|gate_init_bias\\|pocket_path\" config\\v4_pocket.yml" in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-ChildItem -Path data\\processed -Force | Select-Object Name,Length"` rejected: blocked by policy
+ exited 1 in 398ms:
+
+ exited 1 in 399ms:
+
+ succeeded in 408ms:
+config\v4_minimal.yml:18:  mol_graph_path: data/processed/mol_graphs.pt
+config\v4_pocket.yml:17:  mol_graph_path:  data/processed/mol_graphs.pt
+config\v4_pocket.yml:18:  pocket_path:     data/processed/pockets.pt      # new, from scripts/14_extract_pockets.py
+config\v4_ultimate.yml:23:  mol_graph_path:      data/processed/mol_graphs.pt
+config\v4_ultimate.yml:24:  pocket_path:         data/processed/pockets.pt
+config\v4_ultimate.yml:25:  rxn_drfp_npy:        data/processed/rxn_drfp.npy
+config\v4_ultimate.yml:26:  rxn_drfp_keys_csv:   data/processed/rxn_drfp_keys.csv
+config\v4_ultimate.yml:27:  rxn_center_pt:       data/processed/rxn_center_mask.pt
+config\v4_ultimate.yml:28:  annotations_pt:      data/processed/enzyme_annotations.pt
+config\v4_ultimate.yml:29:  annotation_vocab:    data/processed/annotation_vocabs.json
+src\util\data_module.py:156:            gp = config["data"].get("mol_graph_path")
+src\util\data_module.py:161:                raise FileNotFoundError(f"mol_graph_path not found: {gp}")
+src\util\data_module.py:165:        pocket_path = config["data"].get("pocket_path")
+src\util\data_module.py:166:        if pocket_path and Path(pocket_path).exists():
+src\util\data_module.py:167:            self.pockets = torch.load(pocket_path, weights_only=False)
+src\util\data_module.py:174:            npy_path = config["data"].get("rxn_drfp_npy")
+src\util\data_module.py:175:            keys_path = config["data"].get("rxn_drfp_keys_csv")
+src\util\data_module.py:188:            pt_path = config["data"].get("rxn_center_pt")
+src\util\data_module.py:193:                print(f"[warn] rxn_center_pt not found; disabling rxn_center")
+src\util\data_module.py:201:            ann_path = config["data"].get("annotations_pt")
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content config\\v4_ultimate.yml" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "cmd /c dir /b data\\processed" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content config\\v4_pocket.yml" in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "cmd /c dir /b data\\processed"` rejected: blocked by policy
+ succeeded in 415ms:
+# DLcatalysis 4.0 鈥?v4-pocket (4-branch residual with structure)
+#
+# pred = y_seq + g_pair * (y_sub + y_int3d) + g_struct * y_struct
+#
+# Used after pocket extraction (scripts/14_extract_pockets.py) is done.
+
+data:
+  data_representer: sequence_molecular_pocket
+  train_data_df: data/processed/folds/train_fold0.csv
+  valid_data_df: data/processed/folds/valid_fold0.csv
+  test_data_df:  data/processed/folds/test_fold0.csv
+  seq_lmdb:
+    lmdb:        data/processed/seq_prot5.lmdb
+    map_size:    64424509440
+    max_seq_len: 1000
+    seq_fp:      data/processed/seq.csv
+  mol_graph_path:  data/processed/mol_graphs.pt
+  pocket_path:     data/processed/pockets.pt      # new, from scripts/14_extract_pockets.py
+
+model:
+ succeeded in 415ms:
+# DLcatalysis 4.0 鈥?v4-ultimate (闆嗗ぇ鎴愮増)
+#
+# pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+#
+# 闆嗘垚淇″彿锛?#   [ProtT5 seq] + [substrate GINE] + [RXNMapper center flag on atoms]
+#   + [DRFP reaction fingerprint] + [GVP pocket (K=32, 26d features)]
+#   + [3D cross-attn residue脳atom w/ RBF bias]
+#   + [InterPro/Pfam/GO annotation bag-of-words]
+#   + [pH + temperature]
+#   + [EC 4-level embedding]
+
+data:
+  data_representer: sequence_molecular_ultimate
+  train_data_df: data/processed/folds/train_fold0.csv
+  valid_data_df: data/processed/folds/valid_fold0.csv
+  test_data_df:  data/processed/folds/test_fold0.csv
+  seq_lmdb:
+    lmdb:        data/processed/seq_prot5.lmdb
+    map_size:    64424509440
+    max_seq_len: 1000
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Test-Path data\\processed\\mol_graphs.pt" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Test-Path data\\processed\\pockets.pt" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Test-Path data\\processed\\enzyme_annotations.pt" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Test-Path data\\processed\\rxn_drfp.npy" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Test-Path data\\processed\\rxn_center_mask.pt" in E:\AImodel\DLcatalysis4.0 succeeded in 417ms:
+False
+ succeeded in 423ms:
+False
+ succeeded in 449ms:
+False
+ succeeded in 446ms:
+True
+ succeeded in 447ms:
+False
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content train\\run_train.py | Select-Object -First 180" in E:\AImodel\DLcatalysis4.0 succeeded in 433ms:
+"""
+DLcatalysis 4.0 鈥?single-fold or CV training entry.
+
+Usage:
+  # single fold
+  python train/run_train.py --config config/v4_minimal.yml --fold 0
+
+  # 10-fold CV
+  python train/run_train.py --config config/v4_minimal.yml --cv
+
+The config specifies train/valid/test CSV paths via {fold} placeholder or
+hard-coded paths. When --fold is given we overwrite those paths to:
+  data/processed/folds/train_fold{k}.csv
+  data/processed/folds/valid_fold{k}.csv
+  data/processed/folds/test_fold{k}.csv
+"""
+import argparse
+import os
+import sys
+from copy import deepcopy
+codex
+**Verdict: BLOCK**
+
+Concrete bugs found:
+
+1. `xyz_valid` is batch-global, so one valid sample can enable fake 3D distance bias for invalid zero-coordinate samples.
+   In [v4_pocket.py](E:\AImodel\DLcatalysis4.0\src\model\v4_pocket.py:292) and [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:405), `G.MOL_graph_xyz_valid.any()` enables `atom_xyz` for the whole batch. Invalid samples then pass zero atom coords into `torch.cdist`, creating real RBF distance bias against pocket coordinates. This is exactly a poisoning case.
+
+2. Feature flags can remain on in the model after the dataset disables/misses data.
+   [data_module.py](E:\AImodel\DLcatalysis4.0\src\util\data_module.py:182) disables dataset-side DRFP, rxn_center, annot, etc., but does not mutate config or inform `V4Ultimate`. The model is built from the original flags in [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:73). Example: if `use_rxn_drfp: true` but no `RXN_drfp` field exists, `_encode_rxn` returns zeros, then `head_rxn(zeros)` still contributes a learned branch bias via `y_rxn`. That is a silent active modality with missing data.
+
+3. Pocket data missing is silent.
+   If `pocket_path` is absent, the dataset just leaves `self.pockets = None` in [data_module.py](E:\AImodel\DLcatalysis4.0\src\util\data_module.py:163). `v4_pocket` has no `use_pocket` flag, so it silently trains with `y_struct = 0` and `y_int3d = 0`. For `v4_ultimate`, `use_pocket` can stay true while pocket data is absent.
+
+4. Attention all-False masks are not fully safe inside the cross-attention layers.
+   Pooling has a `has_valid` guard in [int3d_cross_attn.py](E:\AImodel\DLcatalysis4.0\src\model\int3d_cross_attn.py:155), but the layer attention itself masks logits then softmaxes in [int3d_cross_attn.py](E:\AImodel\DLcatalysis4.0\src\model\int3d_cross_attn.py:112) and [int3d_cross_attn.py](E:\AImodel\DLcatalysis4.0\src\model\int3d_cross_attn.py:127). If all keys are masked, softmax over all `finfo.min` becomes effectively uniform over invalid tokens, not zero attention. Current loader usually avoids all-False by using dummy nodes, but the module is not robust.
+
+5. `v4_ultimate` ignores configured `struct.gate_init_bias`.
+   `v4_pocket` reads it correctly, but `v4_ultimate` hard-codes `-2.0` in [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:233) and [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:247). Current config also uses `-2.0`, so this is latent but real.
+
+Not a bug: the PyG `__inc__` handling for `MOL_graph_xyz`, `POCKET_edge_index`, and `MOL_rxn_center` looks correct in [data_module.py](E:\AImodel\DLcatalysis4.0\src\util\data_module.py:87). `POCKET_edge_index` is offset by pocket node count, molecule edge indices by atom count, and feature tensors/masks are not offset.
+tokens used
+123,264
+**Verdict: BLOCK**
+
+Concrete bugs found:
+
+1. `xyz_valid` is batch-global, so one valid sample can enable fake 3D distance bias for invalid zero-coordinate samples.
+   In [v4_pocket.py](E:\AImodel\DLcatalysis4.0\src\model\v4_pocket.py:292) and [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:405), `G.MOL_graph_xyz_valid.any()` enables `atom_xyz` for the whole batch. Invalid samples then pass zero atom coords into `torch.cdist`, creating real RBF distance bias against pocket coordinates. This is exactly a poisoning case.
+
+2. Feature flags can remain on in the model after the dataset disables/misses data.
+   [data_module.py](E:\AImodel\DLcatalysis4.0\src\util\data_module.py:182) disables dataset-side DRFP, rxn_center, annot, etc., but does not mutate config or inform `V4Ultimate`. The model is built from the original flags in [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:73). Example: if `use_rxn_drfp: true` but no `RXN_drfp` field exists, `_encode_rxn` returns zeros, then `head_rxn(zeros)` still contributes a learned branch bias via `y_rxn`. That is a silent active modality with missing data.
+
+3. Pocket data missing is silent.
+   If `pocket_path` is absent, the dataset just leaves `self.pockets = None` in [data_module.py](E:\AImodel\DLcatalysis4.0\src\util\data_module.py:163). `v4_pocket` has no `use_pocket` flag, so it silently trains with `y_struct = 0` and `y_int3d = 0`. For `v4_ultimate`, `use_pocket` can stay true while pocket data is absent.
+
+4. Attention all-False masks are not fully safe inside the cross-attention layers.
+   Pooling has a `has_valid` guard in [int3d_cross_attn.py](E:\AImodel\DLcatalysis4.0\src\model\int3d_cross_attn.py:155), but the layer attention itself masks logits then softmaxes in [int3d_cross_attn.py](E:\AImodel\DLcatalysis4.0\src\model\int3d_cross_attn.py:112) and [int3d_cross_attn.py](E:\AImodel\DLcatalysis4.0\src\model\int3d_cross_attn.py:127). If all keys are masked, softmax over all `finfo.min` becomes effectively uniform over invalid tokens, not zero attention. Current loader usually avoids all-False by using dummy nodes, but the module is not robust.
+
+5. `v4_ultimate` ignores configured `struct.gate_init_bias`.
+   `v4_pocket` reads it correctly, but `v4_ultimate` hard-codes `-2.0` in [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:233) and [v4_ultimate.py](E:\AImodel\DLcatalysis4.0\src\model\v4_ultimate.py:247). Current config also uses `-2.0`, so this is latent but real.
+
+Not a bug: the PyG `__inc__` handling for `MOL_graph_xyz`, `POCKET_edge_index`, and `MOL_rxn_center` looks correct in [data_module.py](E:\AImodel\DLcatalysis4.0\src\util\data_module.py:87). `POCKET_edge_index` is offset by pocket node count, molecule edge indices by atom count, and feature tensors/masks are not offset.

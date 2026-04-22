@@ -230,7 +230,11 @@ class V4Ultimate(pl.LightningModule):
                 nn.LeakyReLU(),
                 nn.Linear(self.hidden_dim, 1),
             )
-            nn.init.constant_(self.gate_struct[-1].bias, -2.0)
+            # Read gate bias from config for consistency with v4_pocket
+            self._gate_struct_bias = float(
+                config["model"].get("struct", {}).get("gate_init_bias", -2.0)
+            )
+            nn.init.constant_(self.gate_struct[-1].bias, self._gate_struct_bias)
 
         if self.use_annot:
             # Gate annot branch by how "known" the enzyme is
@@ -244,7 +248,7 @@ class V4Ultimate(pl.LightningModule):
 
         self._init_weights()
         if self.use_pocket:
-            nn.init.constant_(self.gate_struct[-1].bias, -2.0)
+            nn.init.constant_(self.gate_struct[-1].bias, self._gate_struct_bias)
         if self.use_annot:
             nn.init.constant_(self.gate_annot[-1].bias, -1.0)
 
@@ -401,6 +405,7 @@ class V4Ultimate(pl.LightningModule):
         if self.use_int3d and pocket_tokens is not None and atom_tokens is not None and pocket_mask is not None:
             from torch_geometric.utils import to_dense_batch
             atom_xyz = None
+            xyz_valid_per_sample = None
             if hasattr(G, "MOL_graph_xyz") and hasattr(G, "MOL_graph_xyz_valid") \
                     and bool(G.MOL_graph_xyz_valid.any().item()):
                 num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
@@ -408,9 +413,11 @@ class V4Ultimate(pl.LightningModule):
                     torch.arange(num_nodes.size(0), device=self.device), num_nodes
                 )
                 atom_xyz, _ = to_dense_batch(G.MOL_graph_xyz.to(self.device).float(), atom_batch)
+                xyz_valid_per_sample = G.MOL_graph_xyz_valid.view(-1).to(self.device)
             _, _, p_pool_int, a_pool_int = self.int3d(
                 pocket_tokens, atom_tokens, pocket_mask, atom_mask,
                 xyz_p=pocket_xyz, xyz_a=atom_xyz,
+                xyz_valid_per_sample=xyz_valid_per_sample,
             )
             y_int3d = self.head_int3d(torch.cat([p_pool_int, a_pool_int], dim=-1))
         else:

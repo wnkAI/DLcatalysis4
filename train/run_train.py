@@ -35,8 +35,20 @@ from model.v4_ultimate import V4Ultimate
 
 
 def get_model_class(config):
-    name = config["model"].get("model_name", "v4_minimal").lower()
-    if "ultimate" in name:
+    """Route to the right model class.
+
+    The 'any reaction/annotation/condition flag on → V4Ultimate' rule lets
+    config/v4_pocket.yml turn on reaction + annotation + cofactor signals
+    without duplicating code, while keeping v4_pocket.py as a pure
+    pocket-only ablation.
+    """
+    model = config["model"]
+    name = model.get("model_name", "v4_minimal").lower()
+
+    needs_ultimate = any(model.get(f, False) for f in (
+        "use_rxn_drfp", "use_rxn_center", "use_annot", "use_condition",
+    ))
+    if needs_ultimate or "ultimate" in name:
         return V4Ultimate
     if "pocket" in name:
         return V4Pocket

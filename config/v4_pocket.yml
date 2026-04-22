@@ -14,11 +14,35 @@ data:
     map_size:    64424509440
     max_seq_len: 1000
     seq_fp:      data/processed/seq.csv
-  mol_graph_path:  data/processed/mol_graphs.pt
-  pocket_path:     data/processed/pockets.pt      # new, from scripts/14_extract_pockets.py
+  mol_graph_path:      data/processed/mol_graphs.pt
+  pocket_path:         data/processed/pockets.pt      # from scripts/14_extract_pockets.py
+  rxn_drfp_npy:        data/processed/rxn_drfp.npy
+  rxn_drfp_keys_csv:   data/processed/rxn_drfp_keys.csv
+  rxn_center_pt:       data/processed/rxn_center_mask.pt
+  annotations_pt:      data/processed/enzyme_annotations.pt
+  annotation_vocab:    data/processed/annotation_vocabs.json
 
 model:
-  model_name: dlcat4_pocket
+  # model_name includes "pocket_rxn" so run_train.py dispatches to V4Ultimate
+  # with a reaction-conditioned subset of flags (not the full ultimate).
+  # v4-pocket is now the "reaction-conditioned catalytic efficiency"
+  # main-claim baseline, not just "structure-only enzyme-substrate".
+  model_name: dlcat4_pocket_rxn
+  # Feature flags (consumed by V4Ultimate; see src/model/v4_ultimate.py)
+  use_rxn_drfp: true
+  use_rxn_center: true
+  use_pocket: true
+  use_int3d: true
+  use_annot: true
+  use_condition: true
+  use_ec: true
+  drfp_dim: 2048
+  annot_vocab:
+    interpro_family_vocab: 6000
+    pfam_family_vocab: 3000
+    go_term_vocab: 2000
+    embed_dim: 32
+    max_fam_per_enzyme: 16
   hidden_dim: 128
   dropout: 0.20
   feature_norm: true

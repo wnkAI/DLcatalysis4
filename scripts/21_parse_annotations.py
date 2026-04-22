@@ -106,12 +106,28 @@ def main():
         pf_family  = parse_id_set(row.get("pfam_domains"), "PF")  # Pfam IDs reused as "family" signal
         go         = parse_id_set(row.get("go_terms"), "GO:")
 
+        # Derived quality signals for gate_struct consumption
+        cofactor_raw = row.get("cofactor")
+        has_cofactor = bool(isinstance(cofactor_raw, str) and cofactor_raw.strip())
+        active_raw = row.get("active_site")
+        binding_raw = row.get("binding_site")
+        has_active_site = bool(isinstance(active_raw, str) and active_raw.strip())
+        has_binding_site = bool(isinstance(binding_raw, str) and binding_raw.strip())
+        has_any_annot = bool(ipr_family or pf_family or go
+                             or ipr_domain or pf_domain
+                             or has_active_site or has_binding_site)
+
         annotations[uid] = {
             "interpro_domain_ranges": ipr_domain,
             "pfam_domain_ranges": pf_domain,
             "interpro_family_ids": ipr_family,
             "pfam_family_ids": pf_family,
             "go_term_ids": go,
+            # Quality flags piped to gate_struct + logged for Tier-wise reports
+            "has_cofactor": has_cofactor,
+            "has_active_site": has_active_site,
+            "has_binding_site": has_binding_site,
+            "has_any_annot": has_any_annot,
         }
         interpro_family_all.update(ipr_family)
         pfam_family_all.update(pf_family)

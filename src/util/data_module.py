@@ -332,12 +332,16 @@ class SeqMolDataset(torch.utils.data.Dataset):
         return m.long() if isinstance(m, torch.Tensor) else torch.tensor(m, dtype=torch.long)
 
     def _load_annot(self, seq_id: str) -> dict:
-        """Return dict with ipr_ids / pf_ids / go_ids — padded to max_fam."""
+        """Return dict with ipr/pf/go ids (padded to max_fam) + quality flags."""
         K = self.max_fam_per_enzyme
         empty = {
             "ipr_ids": torch.zeros(K, dtype=torch.long),
             "pf_ids":  torch.zeros(K, dtype=torch.long),
             "go_ids":  torch.zeros(K, dtype=torch.long),
+            "has_any_annot": torch.zeros(1, dtype=torch.float32),
+            "has_active_site": torch.zeros(1, dtype=torch.float32),
+            "has_binding_site": torch.zeros(1, dtype=torch.float32),
+            "has_cofactor": torch.zeros(1, dtype=torch.float32),
         }
         if not self.use_annot or self.annotations is None:
             return empty
@@ -355,7 +359,13 @@ class SeqMolDataset(torch.utils.data.Dataset):
                         self.annot_vocab["interpro_family"])
         pf_ids = _pack(a.get("pfam_family_ids", set()), self.annot_vocab["pfam_family"])
         go_ids = _pack(a.get("go_term_ids", set()), self.annot_vocab["go_term"])
-        return {"ipr_ids": ipr_ids, "pf_ids": pf_ids, "go_ids": go_ids}
+        return {
+            "ipr_ids": ipr_ids, "pf_ids": pf_ids, "go_ids": go_ids,
+            "has_any_annot":    torch.tensor([float(a.get("has_any_annot", False))], dtype=torch.float32),
+            "has_active_site":  torch.tensor([float(a.get("has_active_site", False))], dtype=torch.float32),
+            "has_binding_site": torch.tensor([float(a.get("has_binding_site", False))], dtype=torch.float32),
+            "has_cofactor":     torch.tensor([float(a.get("has_cofactor", False))], dtype=torch.float32),
+        }
 
     def __getitem__(self, idx: int):
         seq_id = self.seq_ids[idx]
@@ -380,12 +390,18 @@ class SeqMolDataset(torch.utils.data.Dataset):
             n_atoms = mol_feat["graph_x"].size(0)
             data.MOL_rxn_center = self._load_rxn_center(smi_id, n_atoms)
 
-        # Annotations (bag-of-words padded to fixed K)
+        # Annotations (bag-of-words padded to fixed K) + quality flags
         if self.use_annot:
             annot = self._load_annot(seq_id)
             data.ANNOT_ipr_ids = annot["ipr_ids"].view(1, -1)
             data.ANNOT_pf_ids  = annot["pf_ids"].view(1, -1)
             data.ANNOT_go_ids  = annot["go_ids"].view(1, -1)
+            # Quality flags (each (1,1)) — consumed by gate_struct to make
+            # the structure branch aware of annotation/cofactor evidence.
+            data.ANNOT_has_any     = annot["has_any_annot"].view(1, 1)
+            data.ANNOT_has_active  = annot["has_active_site"].view(1, 1)
+            data.ANNOT_has_binding = annot["has_binding_site"].view(1, 1)
+            data.ANNOT_has_cof     = annot["has_cofactor"].view(1, 1)
 
         # Condition (pH, temp)
         if self.use_condition:

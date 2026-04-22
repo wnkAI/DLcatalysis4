@@ -77,6 +77,9 @@ class V4Ultimate(pl.LightningModule):
         self.use_annot      = config["model"].get("use_annot", True)
         self.use_condition  = config["model"].get("use_condition", True)  # pH, temp
         self.use_ec         = config["model"].get("use_ec", True)
+        # Heteroscedastic aleatoric uncertainty: predict mu + log_var per sample.
+        # Loss becomes 0.5 * exp(-log_var) * (pred-y)^2 + 0.5 * log_var (Kendall & Gal 2017)
+        self.use_uncertainty = config["model"].get("use_uncertainty", False)
 
         # ── ProtT5 (frozen, precomputed) ───────────────────────────────
         init_device = torch.device(config["train"]["device"] if torch.cuda.is_available() else "cpu")
@@ -207,6 +210,10 @@ class V4Ultimate(pl.LightningModule):
             self.head_struct = _mkhead(self.hidden_dim)
         if self.use_annot:
             self.head_annot  = _mkhead(self.hidden_dim)
+        # Aleatoric uncertainty head: log-variance from fused enzyme pool
+        if self.use_uncertainty:
+            self.head_logvar = _mkhead(self.hidden_dim)
+            self._last_log_var = None  # stash for loss access
 
         # ── Gates ──────────────────────────────────────────────────
         pair_in = self.hidden_dim * 2   # enz_pool + graph_emb
@@ -435,9 +442,15 @@ class V4Ultimate(pl.LightningModule):
         g_pair = self.gate_pair(torch.cat(pair_gate_in, dim=-1))
 
         if self.use_pocket:
-            n_res = (pocket_mask.sum(dim=1, keepdim=True).float() / 32.0) if pocket_mask is not None else torch.zeros(B, 1, device=self.device)
-            has_annot_flag = ((annot_emb.abs().sum(dim=-1, keepdim=True) > 1e-6).float()) if self.use_annot else torch.zeros(B, 1, device=self.device)
-            has_cof = torch.zeros(B, 1, device=self.device)  # TODO pipe from dataloader
+            n_res = (pocket_mask.sum(dim=1, keepdim=True).float() / 32.0) \
+                if pocket_mask is not None else torch.zeros(B, 1, device=self.device)
+            # Real signals from dataloader (no longer stubbed zeros)
+            has_annot_flag = (G.ANNOT_has_any.to(self.device).view(B, 1)
+                              if hasattr(G, "ANNOT_has_any")
+                              else torch.zeros(B, 1, device=self.device))
+            has_cof = (G.ANNOT_has_cof.to(self.device).view(B, 1)
+                       if hasattr(G, "ANNOT_has_cof")
+                       else torch.zeros(B, 1, device=self.device))
             quality = torch.cat([n_res, has_annot_flag, has_cof], dim=-1)
             struct_in = [enz_fused, graph_emb, pocket_pool, quality]
             if self.use_ec:
@@ -457,6 +470,15 @@ class V4Ultimate(pl.LightningModule):
                 + g_pair * pair_delta
                 + g_struct * y_struct
                 + g_annot * y_annot)
+
+        # Aleatoric uncertainty: log-variance output (stashed for get_loss)
+        if self.use_uncertainty:
+            # Clip raw log_var to reasonable range to avoid explosion
+            raw_logvar = self.head_logvar(enz_fused)
+            self._last_log_var = raw_logvar.clamp(min=-6.0, max=6.0)
+        else:
+            self._last_log_var = None
+
         return pred, G.y
 
     # ──────────────────────────────────────────────────────────────
@@ -505,15 +527,26 @@ class V4Ultimate(pl.LightningModule):
     def get_loss(self, y_pred, y_true, stage, G=None):
         pred = y_pred.squeeze(-1).float()
         y_target = self._prepare_target(y_true, stage).squeeze(-1).float()
-        loss_type = self.config["model"].get("loss_type", "logcosh")
-        if loss_type == "huber":
-            base = F.huber_loss(pred, y_target,
-                                delta=self.config["model"].get("huber_delta", 1.0))
-        elif loss_type == "logcosh":
-            d = pred - y_target
-            base = (d + F.softplus(-2.0 * d) - math.log(2.0)).mean()
+
+        # Heteroscedastic aleatoric loss (Kendall & Gal 2017) replaces base loss
+        # when uncertainty head is enabled. Formula:
+        #   L = 0.5 * exp(-log_var) * (pred - y)^2 + 0.5 * log_var
+        if self.use_uncertainty and self._last_log_var is not None:
+            log_var = self._last_log_var.squeeze(-1).float()
+            sq_err = (pred - y_target) ** 2
+            base = (0.5 * torch.exp(-log_var) * sq_err + 0.5 * log_var).mean()
+            self.log(f"{stage}_logvar_mean", log_var.mean(),
+                     prog_bar=False, logger=True, sync_dist=True, batch_size=y_true.size(0))
         else:
-            base = F.mse_loss(pred, y_target)
+            loss_type = self.config["model"].get("loss_type", "logcosh")
+            if loss_type == "huber":
+                base = F.huber_loss(pred, y_target,
+                                    delta=self.config["model"].get("huber_delta", 1.0))
+            elif loss_type == "logcosh":
+                d = pred - y_target
+                base = (d + F.softplus(-2.0 * d) - math.log(2.0)).mean()
+            else:
+                base = F.mse_loss(pred, y_target)
         loss = base
 
         pcc_w = self.config["model"].get("pcc_loss_weight", 0.0)

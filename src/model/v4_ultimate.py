@@ -401,7 +401,8 @@ class V4Ultimate(pl.LightningModule):
         if self.use_int3d and pocket_tokens is not None and atom_tokens is not None and pocket_mask is not None:
             from torch_geometric.utils import to_dense_batch
             atom_xyz = None
-            if hasattr(G, "MOL_graph_xyz"):
+            if hasattr(G, "MOL_graph_xyz") and hasattr(G, "MOL_graph_xyz_valid") \
+                    and bool(G.MOL_graph_xyz_valid.any().item()):
                 num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
                 atom_batch = torch.repeat_interleave(
                     torch.arange(num_nodes.size(0), device=self.device), num_nodes

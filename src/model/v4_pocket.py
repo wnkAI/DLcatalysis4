@@ -284,16 +284,20 @@ class V4Pocket(pl.LightningModule):
         # int3d: substrate atoms vs pocket residues with 3D distance bias
         # Substrate atom 3D coords from docked pose (if available); otherwise disable bias
         if pocket_tokens is not None and atom_tokens is not None and pocket_mask is not None:
+            atom_xyz = None
             if hasattr(G, "MOL_graph_xyz"):
-                # Substrate atom coords (N_total, 3) packed; to_dense_batch
-                from torch_geometric.utils import to_dense_batch
-                num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
-                atom_batch = torch.repeat_interleave(
-                    torch.arange(num_nodes.size(0), device=self.device), num_nodes
-                )
-                atom_xyz, _ = to_dense_batch(G.MOL_graph_xyz.to(self.device).float(), atom_batch)
-            else:
-                atom_xyz = None
+                # Use substrate atom coords ONLY if at least one sample in the batch
+                # has a valid RDKit conformer; otherwise disable 3D distance bias
+                # so padded zero-coords don't leak fake geometric signal.
+                if hasattr(G, "MOL_graph_xyz_valid") and bool(G.MOL_graph_xyz_valid.any().item()):
+                    from torch_geometric.utils import to_dense_batch
+                    num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
+                    atom_batch = torch.repeat_interleave(
+                        torch.arange(num_nodes.size(0), device=self.device), num_nodes
+                    )
+                    atom_xyz, _ = to_dense_batch(
+                        G.MOL_graph_xyz.to(self.device).float(), atom_batch
+                    )
             _, _, p_pool_int, a_pool_int = self.int3d(
                 pocket_tokens, atom_tokens, pocket_mask, atom_mask,
                 xyz_p=pocket_xyz, xyz_a=atom_xyz,

@@ -1,0 +1,34 @@
+# DLcatalysis 4.0 — training server requirements (A100 / CUDA 12)
+# Install on A100 server, NOT on local Windows
+
+# Core deep learning
+torch==2.2.0            # PyG wheels target 2.2.0+cu121
+pytorch-lightning>=2.2
+torch-scatter
+torch-cluster
+torch-sparse
+torch-geometric>=2.4
+
+# Protein language model (frozen ProtT5 encoder)
+transformers>=4.35
+sentencepiece           # required by T5Tokenizer
+
+# Cheminformatics
+rdkit>=2023.09
+tqdm
+
+# Data / IO
+lmdb
+numpy
+pandas
+scipy
+scikit-learn
+pyyaml
+
+# Logging / visualization
+rich
+
+# Optional (for v4-pocket / v4-fusion structure branches later)
+# biopython               # parse AlphaFold / PDB structures
+# meeko                   # ligand prep for AutoDock-Vina
+# openbabel               # format conversion

@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude Code harness
+.omc/
+.claude/
+
+# Training artifacts
+train/ckpt_*/
+train/log_*/
+*.ckpt
+*.ckpt.tmp
+
+# Large data artifacts (server-generated)
+data/processed/*.lmdb
+data/processed/*.pt
+data/processed/seq_prot5.lmdb/
+data/processed/mol_graphs.pt
+data/processed/pockets.pt
+data/processed/docking_poses/
+data/structures/
+
+# Keep small CSVs and metadata, ignore bulky raw + intermediates
+data/raw/
+data/processed/*.txt
+data/processed/smiles_probe*.csv
+data/processed/resolver_probe.csv
+data/processed/bucket_report.csv
+data/processed/rhea_coverage.csv
+data/processed/enzyme_data_nsp_tagged.csv
+data/processed/enzyme_data_seqge100.csv
+data/processed/dlcat4_v1.csv
+data/processed/dlcat4_v1_modelable.csv
+data/processed/dlcat4_v1_full_rxn.csv
+
+# Logs
+*.log
+logs/
+
+# Docking outputs
+/data/docking_poses/
+*.pdbqt

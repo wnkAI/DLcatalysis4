@@ -1,0 +1,29 @@
+I'll analyze the diff patch to verify each fix landed correctly and check for any new bugs.
+
+## Bug Verification
+
+- **`src/model/v4_ultimate.py:467-474`**: Inverted dropout scaling uses `mask / max(q, 1e-6)` where `q = 1.0 - p`. When `p=1.0`, `q=0`, `max(0, 1e-6)=1e-6`, mask is all zeros (since `rand >= 1.0` is always False), so `0 / 1e-6 = 0`. Correct. When `p=0`, `q=1.0`, mask is all ones, `1.0 / 1.0 = 1.0`. Correct. No bug.
+
+- **`src/model/v4_ultimate.py:492-493`**: `pocket_tokens = pocket_tokens * keep_pocket.unsqueeze(-1)` — `keep_pocket` shape `(B, 1)` becomes `(B, 1, 1)` via unsqueeze, broadcasts against `(B, K, D)`. Correct. However, with inverted scaling, `keep_pocket` has magnitude `1/(1-p)` for kept samples. This amplifies pocket_tokens by `1/(1-p)` in the kept subset. This is the intended interaction — standard dropout scaling applies to the input, not just the output.
+
+- **`src/model/v4_ultimate.py:532-540`**: `y_pre` dict uses `.detach()` on all branch outputs. No gradient leaks through diagnostics. Correct.
+
+- **`src/model/int3d_cross_attn.py:65`**: `self.nac_max = 3.0` — bias in [-3, 3] added to attention logits. Softmax with logit range ~3 gives attention weights ratio exp(3)/exp(-3) ≈ 403. This is reasonable — attention can still be soft, and the bound prevents collapse. Correct.
+
+- **`src/model/v4_ultimate.py:112-117`**: `use_substrate=False` path — `self.substrate_gnn` is never created. In `_encode_substrate` (line 304-306), early return `(None, zeros, None, None)`. `atom_tokens=None` means int3d block is skipped (line 507). `graph_emb` is zeros, passed to `pair_gate_in` (line 543). The gate's linear layer still has `W_graph` column — learns zero contribution. Acceptable design, no crash.
+
+- **`src/model/v4_ultimate.py:320-329`**: `use_rxn_center=True` but `use_substrate=False` — the guard `if (self.use_rxn_center and self.use_substrate and rxn_center_dense is not None)` prevents `rxn_center_emb` from being accessed. Since `rxn_center_emb` is only created when both are True (line 124), this is safe. Correct.
+
+- **`src/model/v4_ultimate.py:601-625`**: `cov_*` diagnostics now use `mask.any(dim=1).float().mean()` for per-sample fractions. RXN validity uses `getattr(G, "RXN_drfp_valid", None)` with fallback to `drfp.abs().sum() > 0`. `getattr(..., None) is not None` replaces `hasattr`. All correct.
+
+- **`src/model/v4_ultimate.py:320-323`**: `to_dense_batch` called once as float, reused as `.long()` for Embedding. Fixes L3. Correct.
+
+- **`src/model/v4_ultimate.py:367-371`**: `assert node_s.shape[-1] >= 23` added. Fixes L5. Correct.
+
+- **`config/ablation/*.yml`**: All 9 configs now have `use_substrate` flag and `modality_dropout` block. Fixes H1 and L2. Correct.
+
+- **`scripts/26_generate_ablation_configs.py:43-48`**: LADDER updated with `use_substrate` flag. A0 has `use_substrate=False`, A1 has `use_substrate=True`. Correct.
+
+No new bugs found in the fix set.
+
+APPROVED

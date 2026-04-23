@@ -1,0 +1,400 @@
+OpenAI Codex v0.116.0 (research preview)
+--------
+workdir: E:\AImodel\DLcatalysis4.0
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbc9b-7479-77d2-99a4-89a9894caee8
+--------
+user
+Read the brief and diff. Verify round-1 fixes landed correctly AND check for new regressions. Report only bugs. End with APPROVED / NEEDS_WORK / BLOCK.
+mcp startup: no servers
+codex
+I’m reviewing the brief and the current diff, then I’ll verify the round-1 fixes against the code and look for any new regressions before I report findings only.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --stat' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Force' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg --files -g "*brief*" -g "*BRIEF*" -g "*.md"' in E:\AImodel\DLcatalysis4.0 succeeded in 410ms:
+PLAN_v3_addendum.md
+QUESTIONS_FOR_CONSULTATION.md
+PLAN_v2.md
+README_SERVER.md
+PLAN.md
+REVIEWS\AUDIT_PERFILE.md
+REVIEWS\SYNTHESIS.md
+REVIEWS\nac_modality_round2_2026-04-24\BRIEF.md
+REVIEWS\nac_modality_2026-04-23\BRIEF.md
+REVIEWS\nac_modality_2026-04-23\SYNTHESIS.md
+ succeeded in 411ms:
+
+ succeeded in 427ms:
+?? REVIEWS/nac_modality_round2_2026-04-24/
+ succeeded in 458ms:
+
+
+    目录: E:\AImodel\DLcatalysis4.0
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d--h--         2026/4/24      0:04                .git                                                                 
+d-----         2026/4/24      0:10                .omc                                                                 
+d-----         2026/4/24      0:01                config                                                               
+d-----         2026/4/21     17:18                data                                                                 
+d-----         2026/4/24      0:08                REVIEWS                                                              
+d-----         2026/4/24      0:01                scripts                                                              
+d-----         2026/4/22      9:53                src                                                                  
+d-----         2026/4/21     17:18                tests                                                                
+d-----         2026/4/23     14:33                train                                                                
+-a----         2026/4/22     11:43            910 .gitignore                                                           
+-a----         2026/4/21     16:24           4083 PLAN.md                                                              
+-a----         2026/4/21     16:39           6363 PLAN_v2.md                                                           
+-a----         2026/4/21     17:19           2932 PLAN_v3_addendum.md                                                  
+codex
+I found the round-2 review brief. The worktree itself has no tracked modifications, so I’m checking the latest commit(s) and the review artifacts to identify the intended diff and verify whether the round-1 items were actually fixed.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round2_2026-04-24\\BRIEF.md" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_2026-04-23\\SYNTHESIS.md" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_2026-04-23\\BRIEF.md" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git log --oneline --decorate -n 8' in E:\AImodel\DLcatalysis4.0 succeeded in 459ms:
+# /five round-2 brief 鈥?verify round-1 fixes landed cleanly
+
+You are one of five reviewers. Do NOT read other reviewers' output. Form
+your own judgment.
+
+## Context
+
+Round-1 review (see `REVIEWS/nac_modality_2026-04-23/SYNTHESIS.md`) found
+10 bugs. The commit `69d1f94 "/five round-1 fixes"` attempts to fix all
+of them. Your job is to verify, on the ACTUAL CODE, that each fix is
+correct AND did not introduce new bugs.
+
+Repo root: `E:/AImodel/DLcatalysis4.0`. The diff being reviewed is in
+`REVIEWS/nac_modality_round2_2026-04-24/diff.patch`.
+
+## Fix list to verify
+
+| ID | What round-1 claimed to fix | Files touched |
+|----|-----------------------------|---------------|
+| H1 | A0_seq 鈮?A1_sub 鈫?added `use_substrate` flag, gated substrate_gnn/head_sub/_encode_substrate/y_sub, updated LADDER, regenerated 9 ablation YAMLs | `v4_ultimate.py`, `26_generate_ablation_configs.py`, `config/v4_ultimate.yml`, `config/ablation/*.yml` |
+ succeeded in 446ms:
+69d1f94 (HEAD -> master) /five round-1 fixes: 10 bugs from NAC + modality dropout review
+18345ef v4-ultimate: NAC bias in int3d cross-attn + training-time modality dropout
+4f88914 (origin/master) v4-ultimate: diagnostics + ablation matrix + per-file audit
+3309c17 Fix 4 issues found in reviewer audit (2026-04-23)
+cb3a37f Pair-specific pocket docking pipeline (EnzymeCAGE-style 8A + K=32)
+0ea39f5 Docking: QVina2 primary (CPU) + Vina-GPU-2.1 fallback — per /five analysis
+9eafee0 Add v4-innovate: 3 novel-contribution components on top of 3.0 baseline
+86ee8a9 Add 3 log10 targets + Murcko scaffold IDs (v5 data prep gap 1+2)
+ succeeded in 468ms:
+# /five synthesis 鈥?v4-ultimate NAC + modality dropout + diagnostics + ablation
+Date: 2026-04-23
+Reviewers: Codex, DeepSeek, Kimi, internal Claude code-reviewer. Gemini
+hung on stdin pipe (Windows arg-list / credential issue), no output.
+
+All findings below are reproduced against the on-disk code, not taken on
+faith from the reviewer.
+
+## HIGH 鈥?blocks the ablation matrix
+
+### H1 鈥?A0_seq is functionally identical to A1_sub
+- Reporters: Codex (and internal Claude post-verification).
+- Location: `scripts/26_generate_ablation_configs.py:41-49`, `src/model/v4_ultimate.py:115`, `src/model/v4_ultimate.py:471`.
+- The ablation ladder uses flag deltas like `("A0","seq", {...use_rxn_drfp=False, use_pocket=False, ...})`. But V4Ultimate has **no** `use_substrate` flag 鈥?`SubstrateGINE` is always constructed and `y_sub = self.head_sub(graph_emb)` always runs. Verified: `grep use_substrate` returns 0 hits in the model and the generator.
+- Impact: A0 鈮?"seq only", it's "seq + substrate GINE + rxn_center_emb (since rxn_center atom injection is independent of rxn_drfp)". Any paper claim about "incremental contribution of substrate signal" is wrong as-is.
+- Fix: add a `use_substrate: bool` flag, gate `_encode_substrate` output and `y_sub` on it, set `use_substrate=False` in A0, regenerate configs.
+
+## MEDIUM 鈥?correct-ish behavior but bad signal
+
+### M1 鈥?`cov_*` diagnostics are per-batch constants, not per-sample fractions
+ succeeded in 461ms:
+# /five review brief 鈥?v4-ultimate NAC bias + modality dropout + diagnostics + ablation
+
+You are one of five independent reviewers. Do NOT consult the others. Read the
+diff (`diff.patch`), form your own judgment, report what you find.
+
+## Context (kept minimal on purpose)
+- DLcatalysis 4.0, enzyme `log10(kcat/Km)` predictor. Repo at
+  `E:/AImodel/DLcatalysis4.0/`.
+- Core model: `src/model/v4_ultimate.py` (PyTorch Lightning).
+  ```
+  pred = y_seq
+       + g_pair  * (y_sub + y_rxn + y_int3d)
+       + g_struct * y_struct
+       + g_annot * y_annot
+  ```
+- 3D cross-attention module: `src/model/int3d_cross_attn.py`
+  (pocket residues 脳 substrate atoms, bidirectional).
+- Pocket features node_s shape is `(K=32, 26)`: cols 0..19 = AA one-hot
+  (STANDARD_AA order in `scripts/14_extract_pockets.py`), col 20 = pLDDT/100,
+  col 21 = is_active_site, col 22 = is_binding_site, col 23 = is_cofactor_contact,
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round2_2026-04-24\\diff.patch" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"use_substrate|modality_dropout|keep_pocket|y_pre|cov_|node_s.shape\\[-1\\] >= 23|rxn_center|nac_max|getattr\\(.+, None\\) is not None|hasattr\\(\" src\\model\\v4_ultimate.py src\\model\\int3d_cross_attn.py scripts\\26_generate_ablation_configs.py config\\v4_ultimate.yml config\\ablation" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff 18345ef..69d1f94 -- src/model/v4_ultimate.py src/model/int3d_cross_attn.py scripts/26_generate_ablation_configs.py config/v4_ultimate.yml config/ablation' in E:\AImodel\DLcatalysis4.0 succeeded in 393ms:
+config\v4_ultimate.yml:27:  rxn_center_pt:       data/processed/rxn_center_mask.pt
+config\v4_ultimate.yml:49:  use_substrate: true
+config\v4_ultimate.yml:51:  use_rxn_center: true
+config\v4_ultimate.yml:61:  modality_dropout:
+src\model\int3d_cross_attn.py:63:        # effective gain is `tanh(nac_gain) * nac_max`, bounding the bias
+src\model\int3d_cross_attn.py:64:        # in [-nac_max, nac_max] so softmax cannot collapse even if the raw
+src\model\int3d_cross_attn.py:67:        self.nac_max = 3.0
+src\model\int3d_cross_attn.py:139:            gain = self.nac_gain.tanh() * self.nac_max            # bounded per-head
+scripts\26_generate_ablation_configs.py:15:    A1  +sub         +substrate GINE, no rxn_center
+scripts\26_generate_ablation_configs.py:16:    A2  +rxn_center  +RXNMapper reacting-center atom flag
+scripts\26_generate_ablation_configs.py:42:# GINE via a dedicated `use_substrate` flag. Prior to this fix A0 was
+scripts\26_generate_ablation_configs.py:45:    ("A0", "seq",         dict(use_substrate=False,
+scripts\26_generate_ablation_configs.py:46:                               use_rxn_drfp=False, use_rxn_center=False,
+scripts\26_generate_ablation_configs.py:50:    ("A1", "sub",         dict(use_substrate=True)),        # substrate GINE on
+scripts\26_generate_ablation_configs.py:51:    ("A2", "rxn_center",  dict(use_rxn_center=True)),
+src\model\v4_ultimate.py:80:        self.use_substrate  = config["model"].get("use_substrate", True)
+src\model\v4_ultimate.py:82:        self.use_rxn_center = config["model"].get("use_rxn_center", True)
+src\model\v4_ultimate.py:115:        if self.use_substrate:
+src\model\v4_ultimate.py:125:        if self.use_rxn_center and self.use_substrate:
+src\model\v4_ultimate.py:127:            self.rxn_center_emb = nn.Embedding(2, self.hidden_dim)
+ succeeded in 399ms:
+diff --git a/config/ablation/v4_ultimate_A0_seq.yml b/config/ablation/v4_ultimate_A0_seq.yml
+index 3106a3c..6dbb1b1 100644
+--- a/config/ablation/v4_ultimate_A0_seq.yml
++++ b/config/ablation/v4_ultimate_A0_seq.yml
+@@ -31,6 +31,7 @@ model:
+   rank_max_pairs_substrate: 16
+   rank_min_diff_enzyme: 0.1
+   rank_min_diff_substrate: 0.1
++  use_substrate: false
+   use_rxn_drfp: false
+   use_rxn_center: false
+   use_pocket: false
+@@ -38,6 +39,10 @@ model:
+   use_annot: false
+   use_condition: false
+   use_ec: false
++  modality_dropout:
++    rxn: 0.15
++    pocket: 0.15
++    annot: 0.15
+ succeeded in 684ms:
+diff --git a/REVIEWS/nac_modality_2026-04-23/BRIEF.md b/REVIEWS/nac_modality_2026-04-23/BRIEF.md
+new file mode 100644
+index 0000000..98f2326
+--- /dev/null
++++ b/REVIEWS/nac_modality_2026-04-23/BRIEF.md
+@@ -0,0 +1,71 @@
++# /five review brief 鈥?v4-ultimate NAC bias + modality dropout + diagnostics + ablation
++
++You are one of five independent reviewers. Do NOT consult the others. Read the
++diff (`diff.patch`), form your own judgment, report what you find.
++
++## Context (kept minimal on purpose)
++- DLcatalysis 4.0, enzyme `log10(kcat/Km)` predictor. Repo at
++  `E:/AImodel/DLcatalysis4.0/`.
++- Core model: `src/model/v4_ultimate.py` (PyTorch Lightning).
++  ```
++  pred = y_seq
++       + g_pair  * (y_sub + y_rxn + y_int3d)
++       + g_struct * y_struct
++       + g_annot * y_annot
+codex
+The round-1 fixes are present in the diff and on disk. I’m now checking the surrounding forward path and config assumptions for any cases where the new logic still fails or changes behavior incorrectly.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/v4_ultimate.py'; "'$c=Get-Content $p; $start=450; $end=670; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/v4_ultimate.py'; "'$c=Get-Content $p; $start=70; $end=170; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/v4_ultimate.py'; "'$c=Get-Content $p; $start=300; $end=380; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/int3d_cross_attn.py'; "'$c=Get-Content $p; $start=1; $end=220; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/v4_ultimate.py'; "'$c=Get-Content $p; $start=450; $end=670; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/int3d_cross_attn.py'; "'$c=Get-Content $p; $start=1; $end=220; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/v4_ultimate.py'; "'$c=Get-Content $p; $start=70; $end=170; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$p='"'src/model/v4_ultimate.py'; "'$c=Get-Content $p; $start=300; $end=380; for($i=$start;$i -le $end;$i++){ if($i -le $c.Length){ '"'{0}:{1}' -f "'$i,$c[$i-1] } }'` rejected: blocked by policy
+codex
+I hit a shell policy limit on the line-numbering command, so I’m switching to simpler read-only commands to inspect the same code blocks with context.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\v4_ultimate.py | Select-Object -Skip 69 -First 101" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\v4_ultimate.py | Select-Object -Skip 449 -First 221" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\int3d_cross_attn.py | Select-Object -First 220" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\v4_ultimate.py | Select-Object -Skip 299 -First 81" in E:\AImodel\DLcatalysis4.0 succeeded in 478ms:
+        self.val_preds, self.val_targets     = [], []
+        self.test_preds, self.test_targets   = [], []
+        self._last_test_metrics = None
+
+        self.log_dir = config["train"]["log_path"]
+        os.makedirs(self.log_dir, exist_ok=True)
+        model_name = config["model"].get("model_name", "v4_ultimate")
+        self.results_file = os.path.join(self.log_dir, f"{model_name}_{self.run_id}.csv")
+
+        # Feature flags
+        self.use_substrate  = config["model"].get("use_substrate", True)
+        self.use_rxn_drfp   = config["model"].get("use_rxn_drfp", True)
+        self.use_rxn_center = config["model"].get("use_rxn_center", True)
+        self.use_pocket     = config["model"].get("use_pocket", True)
+        self.use_int3d      = config["model"].get("use_int3d", True)
+        self.use_annot      = config["model"].get("use_annot", True)
+        self.use_condition  = config["model"].get("use_condition", True)  # pH, temp
+        self.use_ec         = config["model"].get("use_ec", True)
+        # Heteroscedastic aleatoric uncertainty: predict mu + log_var per sample.
+        # Loss becomes 0.5 * exp(-log_var) * (pred-y)^2 + 0.5 * log_var (Kendall & Gal 2017)
+ succeeded in 478ms:
+    def forward(self, G):
+        B = G.num_graphs if hasattr(G, "num_graphs") else 1
+        if hasattr(G, "y") and G.y.device != self.device:
+            G.y = G.y.to(self.device)
+
+        # Encode all modalities
+        _, enz_pool, _ = self._encode_enzyme(G, B)
+        atom_tokens, graph_emb, atom_mask, rxn_center_dense = \
+            self._encode_substrate(G, B)
+        rxn_emb = self._encode_rxn(G, B)
+        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz, pocket_cat = \
+            self._encode_pocket(G, B)
+        annot_emb = self._encode_annot(G, B)
+        cond_emb = self._encode_condition(G, B)
+        ec_emb = self._encode_ec(G, B)
+
+        # Fuse enzyme: baseline enzyme embedding mixes seq + condition (+ maybe more)
+        enz_fused = enz_pool + cond_emb
+
+        # 鈹€鈹€ Modality dropout 鈹€鈹€
+ succeeded in 495ms:
+        pooled = self._attn_pool_seq(feat, seq_mask, self.seq_attn_pool)
+        return feat, pooled, seq_mask
+
+    def _encode_substrate(self, G, B):
+        # Substrate branch can be fully disabled for A0 (seq-only) ablation:
+        # no GINE forward, no parameters updated, returns zero embed.
+        if (not self.use_substrate
+                or not hasattr(G, "MOL_graph_x")
+                or G.MOL_graph_x is None):
+            z = torch.zeros(B, self.hidden_dim, device=self.device)
+            return None, z, None, None
+        num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
+        graph_batch = torch.repeat_interleave(
+            torch.arange(num_nodes.size(0), device=self.device), num_nodes
+        )
+        atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
+            x=G.MOL_graph_x.to(self.device),
+            edge_index=G.MOL_graph_edge_index.to(self.device),
+            edge_attr=G.MOL_graph_edge_attr.to(self.device),
+            batch=graph_batch,
+ succeeded in 512ms:
+"""
+3D-aware cross-attention between pocket residues and substrate atoms.
+
+Usage in model forward:
+    y_int3d = Int3DCrossAttn(pocket_tokens, atom_tokens,
+                             pocket_mask, atom_mask,
+                             pocket_xyz, atom_xyz)
+
+The distance RBF bias injects 3D geometry into attention scores:
+    attn_logits = Q K^T / sqrt(d) + W_dist * rbf(||pocket_i - atom_j||)
+
+When no atom 3D coordinates are available (e.g., substrate only has 2D
+RDKit graph, no docked pose), pass atom_xyz=None 鈫?distance bias is
+disabled automatically (acts as plain 1D residue-atom cross-attention).
+"""
+import math
+from typing import Optional
+
+import torch
+import torch.nn as nn
+codex
+I found one fix that did not land consistently: there are still raw `hasattr(...).to(...)` checks in the forward pass. I’m doing one more targeted sweep for the same pattern and for any other new train/eval mismatches introduced by the dropout changes.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(G, \\\"|getattr\\(G, \\\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content config\\ablation\\v4_ultimate_A0_seq.yml | Select-Object -First 80" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content scripts\\26_generate_ablation_configs.py | Select-Object -First 140" in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(G, \\\"|getattr\\(G, \\\" src\\model\\v4_ultimate.py"` rejected: blocked by policy
+ succeeded in 439ms:
+data:
+  data_representer: sequence_molecular_ultimate
+  train_data_df: data/processed/folds/train_fold0.csv
+  valid_data_df: data/processed/folds/valid_fold0.csv
+  test_data_df: data/processed/folds/test_fold0.csv
+  seq_lmdb:
+    lmdb: data/processed/seq_prot5.lmdb
+    map_size: 64424509440
+    max_seq_len: 1000
+    seq_fp: data/processed/seq.csv
+  mol_graph_path: data/processed/mol_graphs.pt
+  pocket_path: data/processed/pockets.pt
+  rxn_drfp_npy: data/processed/rxn_drfp.npy
+  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
+  rxn_center_pt: data/processed/rxn_center_mask.pt
+  annotations_pt: data/processed/enzyme_annotations.pt
+  annotation_vocab: data/processed/annotation_vocabs.json
+model:
+  model_name: v4_ultimate_A0_seq
+  hidden_dim: 128
+ succeeded in 450ms:
+"""
+DLcatalysis 4.0 鈥?v4-ultimate ablation matrix generator.
+
+Emits a family of YAML configs that progressively enable each modality,
+so we can measure the incremental contribution of every branch of the
+v4-ultimate residual:
+
+    pred = y_seq + g_pair*(y_sub + y_rxn + y_int3d)
+                + g_struct * y_struct
+                + g_annot  * y_annot
+
+Ablation ladder (each row keeps everything from the row above):
+
+    A0  seq          seq only (ProtT5 + attn pool + MLP)
+    A1  +sub         +substrate GINE, no rxn_center
+    A2  +rxn_center  +RXNMapper reacting-center atom flag
+    A3  +drfp        +DRFP reaction fingerprint
+    A4  +pocket      +GVP pocket encoder
+    A5  +int3d       +pocket 脳 atom 3D cross-attention
+    A6  +annot       +InterPro / Pfam / GO bag-of-words
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Select-String -Path src\\model\\v4_ultimate.py -Pattern 'hasattr\\(G, \"|getattr\\(G, \"'" in E:\AImodel\DLcatalysis4.0 succeeded in 448ms:
+
+src\model\v4_ultimate.py:293:        if not hasattr(G, "SEQ_seq_padding_mask"):
+src\model\v4_ultimate.py:307:                or not hasattr(G, "MOL_graph_x")
+src\model\v4_ultimate.py:326:        if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
+src\model\v4_ultimate.py:349:        if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+src\model\v4_ultimate.py:362:        if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+src\model\v4_ultimate.py:404:        if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+src\model\v4_ultimate.py:426:        ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph") else to
+rch.full((B, 1), 7.0, device=self.device)
+src\model\v4_ultimate.py:429:        temp = G.COND_temp.to(self.device).float().view(B, 1) if hasattr(G, "COND_temp") e
+lse torch.full((B, 1), 25.0, device=self.device)
+src\model\v4_ultimate.py:436:        if not (self.use_ec and hasattr(G, "EC_ids")):
+src\model\v4_ultimate.py:451:        B = G.num_graphs if hasattr(G, "num_graphs") else 1
+src\model\v4_ultimate.py:452:        if hasattr(G, "y") and G.y.device != self.device:
+src\model\v4_ultimate.py:514:            if hasattr(G, "MOL_graph_xyz") and hasattr(G, "MOL_graph_xyz_valid") \
+src\model\v4_ultimate.py:570:                              if hasattr(G, "ANNOT_has_any")
+src\model\v4_ultimate.py:573:                       if hasattr(G, "ANNOT_has_cof")
+src\model\v4_ultimate.py:652:        rxn_valid = getattr(G, "RXN_drfp_valid", None)
+src\model\v4_ultimate.py:656:            drfp = getattr(G, "RXN_drfp", None)
+src\model\v4_ultimate.py:661:        annot_any = getattr(G, "ANNOT_has_any", None)
+codex
+- `src/model/v4_ultimate.py:480-498, 503-554`  
+  The new inverted-scaled `keep_*` mask is reused at embed level, token level, and output level, so kept samples are amplified multiple times (`rxn_emb`, `pocket_pool`, `annot_emb`, `pocket_tokens`, then `y_*` again) instead of satisfying the claimed `E[keep * x] == x`.  
+  Why it matters: this creates a train/eval mismatch across every dropped modality branch, and for `int3d` it is worse because the `1/(1-p)` scaling is injected into the attention stack itself, where the softmax makes the effect nonlinear.  
+  Suggested fix: keep a raw Bernoulli `mask01` for zeroing gates/tokens/output bias leaks, and apply any `/(1-p)` scaling at most once, not both before and after nonlinear heads/attention.
+
+- `src/model/v4_ultimate.py:326, 514, 570-573`  
+  The `None`-guard fix is incomplete: several paths still use raw `hasattr(...)` and then immediately call `.to()`/`.any()` on the attribute (`MOL_rxn_center`, `MOL_graph_xyz_valid`, `ANNOT_has_any`, `ANNOT_has_cof`).  
+  Why it matters: if the dataloader sets these fields to `None` instead of omitting them, forward still crashes, so round-1 L1 did not land cleanly.  
+  Suggested fix: replace the remaining checks with `x = getattr(G, "...", None)` and branch on `x is not None` before using tensor methods.
+
+**NEEDS_WORK**
+tokens used
+53,366
+- `src/model/v4_ultimate.py:480-498, 503-554`  
+  The new inverted-scaled `keep_*` mask is reused at embed level, token level, and output level, so kept samples are amplified multiple times (`rxn_emb`, `pocket_pool`, `annot_emb`, `pocket_tokens`, then `y_*` again) instead of satisfying the claimed `E[keep * x] == x`.  
+  Why it matters: this creates a train/eval mismatch across every dropped modality branch, and for `int3d` it is worse because the `1/(1-p)` scaling is injected into the attention stack itself, where the softmax makes the effect nonlinear.  
+  Suggested fix: keep a raw Bernoulli `mask01` for zeroing gates/tokens/output bias leaks, and apply any `/(1-p)` scaling at most once, not both before and after nonlinear heads/attention.
+
+- `src/model/v4_ultimate.py:326, 514, 570-573`  
+  The `None`-guard fix is incomplete: several paths still use raw `hasattr(...)` and then immediately call `.to()`/`.any()` on the attribute (`MOL_rxn_center`, `MOL_graph_xyz_valid`, `ANNOT_has_any`, `ANNOT_has_cof`).  
+  Why it matters: if the dataloader sets these fields to `None` instead of omitting them, forward still crashes, so round-1 L1 did not land cleanly.  
+  Suggested fix: replace the remaining checks with `x = getattr(G, "...", None)` and branch on `x is not None` before using tensor methods.
+
+**NEEDS_WORK**

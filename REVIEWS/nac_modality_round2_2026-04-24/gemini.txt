@@ -1,0 +1,12 @@
+Loaded cached credentials.
+* `src/model/v4_ultimate.py` lines 480-555
+  * Modality dropout applies the inverted-scaled mask `keep_*` multiple times sequentially to the same modality (embed-level, token-level, and output-level), causing compounded scaling and architectural distortions.
+  * Why it matters: Multiplying embeddings (e.g., `rxn_emb`) and final predictions (`y_rxn`) by the same scaled mask squares the scaling factor (yielding a 1.38x inflation during training); additionally, scaling `pocket_tokens` by 1.17 artificially inflates the cross-attention queries/keys (altering softmax temperature) and breaks the residual connection balance (`scaled_pocket + unscaled_att`) before LayerNorm. Finally, `y_pre` magnitudes are still perturbed since they read from already-scaled embeddings.
+  * Suggested fix: Use an unscaled binary mask `bin_mask = (keep_* > 0).float()` for token-level (`pocket_tokens`) and output-level (`y_*`) zeroing, and only apply the `1/(1-p)` scaling exactly once per modality (e.g., on the final branch `y_*` outputs).
+
+* `src/model/v4_ultimate.py` lines 220, 230, and 556
+  * `use_substrate=False` does not remove `graph_emb` from the input dimension of `gate_pair` and `gate_struct`.
+  * Why it matters: The gates' linear layers retain a hardcoded `W_graph` column that always receives `torch.zeros` when the substrate branch is disabled, wasting parameters and contradicting the dynamic dimension sizing properly used for `use_rxn_drfp` and `use_ec`.
+  * Suggested fix: Conditionally exclude `self.hidden_dim` from `pair_in` and `struct_in` when `self.use_substrate=False`, and similarly omit `graph_emb` from the `pair_gate_in` and `struct_in` lists in the forward pass.
+
+**NEEDS_WORK**

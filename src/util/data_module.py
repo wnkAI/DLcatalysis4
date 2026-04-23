@@ -98,6 +98,8 @@ class SeqMolComplexData(torch_geometric.data.Data):
             return 0
         if key.startswith("RXN_") or key.startswith("ANNOT_") or key.startswith("COND_"):
             return 0
+        if key in ("Y_KCAT", "Y_KM", "Y_KCATKM"):
+            return 0
         if key == "EC_ids":
             return 0
         if key.startswith("SEQ_"):
@@ -127,10 +129,18 @@ class SeqMolDataset(torch.utils.data.Dataset):
         self.smi_ids  = self.df["SMI_ID"].tolist()
         self.ec_s     = self.df["EC_NUMBER"].tolist()
         self.y_s      = self.df["Y_VALUE"].tolist()
-        # Optional columns for ultimate model
+        # Optional columns for ultimate / innovate models
         self.rxn_smiles = self.df["RXN_SMILES"].tolist() if "RXN_SMILES" in df.columns else [None] * len(df)
         self.phs        = self.df["PH"].tolist() if "PH" in df.columns else [None] * len(df)
         self.temps      = self.df["TEMP"].tolist() if "TEMP" in df.columns else [None] * len(df)
+        # Multi-task log10 targets (v4-innovate). Any missing → NaN (masked in loss)
+        def _col_or_nan(col):
+            if col in df.columns:
+                return self.df[col].tolist()
+            return [float("nan")] * len(df)
+        self.log_kcat    = _col_or_nan("LOG_KCAT")
+        self.log_km      = _col_or_nan("LOG_KM")
+        self.log_kcat_km = _col_or_nan("LOG_KCAT_KM")
 
         self.use_ec = config["model"].get("use_ec", False)
 
@@ -415,6 +425,11 @@ class SeqMolDataset(torch.utils.data.Dataset):
             data.EC_ids = torch.tensor([ec_ids], dtype=torch.long)
 
         data.y = torch.tensor([self.y_s[idx]], dtype=torch.float)
+
+        # Multi-task targets (v4-innovate). Each is (1,) with NaN if missing.
+        data.Y_KCAT   = torch.tensor([self.log_kcat[idx]], dtype=torch.float)
+        data.Y_KM     = torch.tensor([self.log_km[idx]], dtype=torch.float)
+        data.Y_KCATKM = torch.tensor([self.log_kcat_km[idx]], dtype=torch.float)
 
         # Store IDs for ranking losses
         data.SEQ_seq_id = seq_id

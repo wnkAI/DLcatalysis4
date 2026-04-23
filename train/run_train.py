@@ -32,19 +32,23 @@ from util.data_module import Singledataset
 from model.v4_minimal import V4Minimal
 from model.v4_pocket import V4Pocket
 from model.v4_ultimate import V4Ultimate
+from model.v4_innovate import V4Innovate
 
 
 def get_model_class(config):
     """Route to the right model class.
 
-    The 'any reaction/annotation/condition flag on → V4Ultimate' rule lets
-    config/v4_pocket.yml turn on reaction + annotation + cofactor signals
-    without duplicating code, while keeping v4_pocket.py as a pure
-    pocket-only ablation.
+    Priority:
+      1. model_name contains 'innovate' → V4Innovate  (3-head multi-task + consistency)
+      2. model_name contains 'ultimate' OR any ultimate flag on → V4Ultimate
+      3. model_name contains 'pocket' → V4Pocket
+      4. else → V4Minimal (pair-only baseline)
     """
     model = config["model"]
     name = model.get("model_name", "v4_minimal").lower()
 
+    if "innovate" in name:
+        return V4Innovate
     needs_ultimate = any(model.get(f, False) for f in (
         "use_rxn_drfp", "use_rxn_center", "use_annot", "use_condition",
     ))

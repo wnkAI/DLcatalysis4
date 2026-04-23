@@ -1,0 +1,94 @@
+# DLcatalysis 4.0 — v4-innovate (主创新版)
+#
+# 核心创新：
+#   1. Multi-task heads (kcat / Km / kcat/Km) + physical consistency loss
+#   2. Pair-specific local complex pocket (each pair has its own docked structure)
+#   3. Within-enzyme Spearman as primary metric
+#
+# Architecture:
+#   3 heads (head_kcat, head_km, head_kcatkm) on shared trunk
+#   Trunk = concat([enz_pool, graph_emb, rxn_emb, int3d_emb, pocket_pool]) → MLP
+#   Loss = L_kcat + L_km + L_kcatkm + λ_cons * (ŷ_kcat - ŷ_km - ŷ_kcatkm)²_logcosh
+
+data:
+  data_representer: sequence_molecular_pocket
+  # Switch to augmented CSV which has LOG_KCAT / LOG_KM / LOG_KCAT_KM + SCAFFOLD_ID
+  train_data_df: data/processed/folds/train_fold0.csv
+  valid_data_df: data/processed/folds/valid_fold0.csv
+  test_data_df:  data/processed/folds/test_fold0.csv
+  seq_lmdb:
+    lmdb:        data/processed/seq_prot5.lmdb
+    map_size:    64424509440
+    max_seq_len: 1000
+    seq_fp:      data/processed/seq.csv
+  mol_graph_path:      data/processed/mol_graphs.pt
+  # Pair-specific pocket: key = (uniprot_id, smi_id), not uniprot_id alone
+  pocket_path:         data/processed/pockets_pair.pt
+  rxn_drfp_npy:        data/processed/rxn_drfp.npy
+  rxn_drfp_keys_csv:   data/processed/rxn_drfp_keys.csv
+  rxn_center_pt:       data/processed/rxn_center_mask.pt
+
+model:
+  model_name: dlcat4_innovate
+  hidden_dim: 128
+  dropout: 0.20
+  loss_type: logcosh
+
+  # Multi-task loss weights (innovation #1)
+  lambda_reg: 1.0
+  lambda_cons: 0.3      # consistency: ŷ_kcat - ŷ_km ≈ ŷ_kcatkm
+
+  # Feature flags
+  use_rxn_drfp: true
+  use_pocket: true
+  use_int3d: true
+  use_prods_info: false            # product cross-attn arm (off by default)
+  use_interaction_weight: true     # EnzymeCAGE bio-prior (needs rxn_center data)
+
+  seq_module:
+    seq_hidden_dim: 512
+
+  substrate_gnn:
+    enabled: true
+    n_layers: 4
+    dropout: 0.10
+
+  int3d:
+    n_layers: 2
+    n_head: 4
+
+  struct:
+    in_s_dim: 21          # 20 AA one-hot + 1 active-site flag
+    in_v_dim: 2
+    v_hidden: 16
+    gvp_layers: 3
+    edge_s_dim: 16
+    edge_v_dim: 1
+
+  drfp_dim: 2048
+
+  output_header:
+    hidden_dim: 256
+    norm_fn: layer
+    act_fn: relu
+
+train:
+  batch_size: 12
+  max_epochs: 80
+  min_epochs: 15
+  earlystrop_patience: 20
+  grad_accum: 2
+  precision: bf16-mixed
+  seed: 42
+  valid_freq: 1.0
+  n_cpus: 8
+  n_gpu: [0]
+  device: cuda
+  checkpoint_path: train/ckpt_innovate
+  log_path: train/log_innovate
+  optimizer:
+    name: adamW
+    lr: 1.0e-4
+    weight_decay: 1.0e-2
+    warm_epoch: 4
+    min_lr: 1.0e-6

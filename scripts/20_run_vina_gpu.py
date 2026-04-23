@@ -21,13 +21,26 @@ Output per (uniprot_id, smi_id):
   manifest CSV updated with {uid}_{smi_id} -> pose_path, vina_score
 
 Usage:
+  # Primary: QVina2 CPU (16 cores, ~4-6 days for 25k pairs)
   python scripts/20_run_vina_gpu.py \
+    --tool qvina2 \
+    --binary /usr/local/bin/qvina2.1_linux_x86_64 \
+    --workers 16 \
+    --cpu_per_job 1 \
     --final_data data/processed/final_data.csv \
     --manifest data/processed/structure_manifest.csv \
     --smi_csv data/processed/smi.csv \
-    --out_dir /data/wnk/docking_poses \
-    --vina_gpu /usr/local/bin/vina-gpu \
-    --workers 4
+    --out_dir data/processed/docked_pairs
+
+  # Fallback: Vina-GPU-2.1 (if QVina2 install fails or takes >6 days)
+  python scripts/20_run_vina_gpu.py \
+    --tool vina_gpu \
+    --binary /usr/local/bin/vina-gpu \
+    --workers 2 \
+    --final_data data/processed/final_data.csv \
+    --manifest data/processed/structure_manifest.csv \
+    --smi_csv data/processed/smi.csv \
+    --out_dir data/processed/docked_pairs
 """
 import argparse
 import json
@@ -128,11 +141,69 @@ def prep_receptor_pdbqt(pdb_path: str, out_path: str) -> bool:
         return False
 
 
+def _parse_first_mode_score(stdout: str) -> float | None:
+    """Parse the top-mode affinity from Vina-family stdout."""
+    for line in stdout.splitlines():
+        if line.strip().startswith("1 "):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return float(parts[1])
+                except ValueError:
+                    continue
+    return None
+
+
+def run_qvina2(binary: str, receptor: str, ligand: str,
+               box_center: np.ndarray, box_size: float,
+               out_pdbqt: str, log_path: str,
+               exhaustiveness: int = 8, num_modes: int = 5,
+               cpu: int = 1, seed: int = 42,
+               timeout: int = 600) -> dict:
+    """Invoke QVina2 (CPU) binary. Same CLI shape as classical Vina.
+
+    QVina2 release: https://github.com/QVina/qvina (wget static linux binary).
+    CPU-only; one QVina2 process uses 1 core per ligand by default. Parallelism
+    comes from running many pairs concurrently at the ProcessPoolExecutor
+    level (see dock_one + main).
+    """
+    cmd = [
+        binary,
+        "--receptor", receptor,
+        "--ligand", ligand,
+        "--center_x", f"{box_center[0]:.2f}",
+        "--center_y", f"{box_center[1]:.2f}",
+        "--center_z", f"{box_center[2]:.2f}",
+        "--size_x", f"{box_size:.1f}",
+        "--size_y", f"{box_size:.1f}",
+        "--size_z", f"{box_size:.1f}",
+        "--exhaustiveness", str(exhaustiveness),
+        "--num_modes", str(num_modes),
+        "--cpu", str(cpu),
+        "--seed", str(seed),
+        "--out", out_pdbqt,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        with open(log_path, "w") as f:
+            f.write(proc.stdout)
+            f.write("\n=== STDERR ===\n")
+            f.write(proc.stderr)
+        score = _parse_first_mode_score(proc.stdout)
+        return {
+            "score": score,
+            "ok": proc.returncode == 0 and Path(out_pdbqt).exists(),
+        }
+    except Exception as e:
+        return {"score": None, "ok": False, "error": str(e)}
+
+
 def run_vina_gpu(vina_gpu: str, receptor: str, ligand: str,
                  box_center: np.ndarray, box_size: float,
                  out_pdbqt: str, log_path: str,
                  exhaustiveness: int = 16, num_modes: int = 5) -> dict:
-    """Invoke vina-gpu binary; return {"score": float, "ok": bool}."""
+    """Invoke vina-gpu binary (fallback if QVina2 is not enough).
+    Not the primary engine for DLcatalysis 4.0 v4-innovate."""
     cmd = [
         vina_gpu,
         "--receptor", receptor,
@@ -153,31 +224,32 @@ def run_vina_gpu(vina_gpu: str, receptor: str, ligand: str,
             f.write(proc.stdout)
             f.write("\n=== STDERR ===\n")
             f.write(proc.stderr)
-        # Parse score from output (first mode affinity)
-        score = None
-        for line in proc.stdout.splitlines():
-            if line.strip().startswith("1 "):
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        score = float(parts[1])
-                        break
-                    except ValueError:
-                        continue
+        score = _parse_first_mode_score(proc.stdout)
         return {"score": score, "ok": proc.returncode == 0 and Path(out_pdbqt).exists()}
     except Exception as e:
         return {"score": None, "ok": False, "error": str(e)}
 
 
 def dock_one(task):
-    """Worker: dock one (uniprot, smi_id) pair."""
+    """Worker: dock one (uniprot, smi_id) pair.
+
+    Task fields:
+      tool:      'qvina2' (default, CPU primary) or 'vina_gpu' (fallback)
+      binary:    path to tool binary (qvina2.1_linux_x86_64 / vina-gpu)
+      exhaustiveness, cpu, seed, box_size: docking knobs
+    """
     uid = task["uid"]
     smi_id = task["smi_id"]
     smi = task["smi"]
     receptor_pdb = task["receptor_pdb"]
     box_center = np.array(task["box_center"])
     out_dir = Path(task["out_dir"])
-    vina_gpu = task["vina_gpu"]
+    tool = task.get("tool", "qvina2")
+    binary = task["binary"]
+    exhaustiveness = task.get("exhaustiveness", 8 if tool == "qvina2" else 16)
+    cpu = task.get("cpu", 1)
+    seed = task.get("seed", 42)
+    box_size = task.get("box_size", 22.0)
 
     pair_prefix = f"{uid}_{smi_id}"
     lig_pdbqt = out_dir / f"{pair_prefix}.lig.pdbqt"
@@ -185,7 +257,7 @@ def dock_one(task):
     out_pdbqt = out_dir / f"{pair_prefix}.pdbqt"
     log_path = out_dir / f"{pair_prefix}.log"
 
-    # Skip if already done
+    # Skip if already done (resumability)
     if out_pdbqt.exists():
         return {"pair": pair_prefix, "score": None, "ok": True, "cached": True}
 
@@ -198,13 +270,25 @@ def dock_one(task):
         if not prep_receptor_pdbqt(receptor_pdb, str(rec_pdbqt)):
             return {"pair": pair_prefix, "ok": False, "error": "receptor_prep"}
 
-    # Run Vina-GPU
-    result = run_vina_gpu(
-        vina_gpu, str(rec_pdbqt), str(lig_pdbqt),
-        box_center, box_size=22.0,
-        out_pdbqt=str(out_pdbqt), log_path=str(log_path),
-    )
+    # Dispatch
+    if tool == "qvina2":
+        result = run_qvina2(
+            binary, str(rec_pdbqt), str(lig_pdbqt),
+            box_center, box_size=box_size,
+            out_pdbqt=str(out_pdbqt), log_path=str(log_path),
+            exhaustiveness=exhaustiveness, cpu=cpu, seed=seed,
+        )
+    elif tool == "vina_gpu":
+        result = run_vina_gpu(
+            binary, str(rec_pdbqt), str(lig_pdbqt),
+            box_center, box_size=box_size,
+            out_pdbqt=str(out_pdbqt), log_path=str(log_path),
+            exhaustiveness=exhaustiveness,
+        )
+    else:
+        return {"pair": pair_prefix, "ok": False, "error": f"unknown_tool: {tool}"}
     result["pair"] = pair_prefix
+    result["tool"] = tool
     return result
 
 
@@ -214,12 +298,30 @@ def main():
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--smi_csv", required=True)
     ap.add_argument("--out_dir", required=True)
-    ap.add_argument("--vina_gpu", default="vina-gpu")
+    # Docking tool: qvina2 (primary) or vina_gpu (fallback)
+    ap.add_argument("--tool", choices=["qvina2", "vina_gpu"], default="qvina2",
+                    help="qvina2: CPU primary (5-20× faster than classical Vina). "
+                         "vina_gpu: fallback if QVina2 stalls.")
+    ap.add_argument("--binary", default=None,
+                    help="path to qvina2.1_linux_x86_64 or vina-gpu binary. "
+                         "If not given, uses 'qvina2.1' for qvina2 and 'vina-gpu' for vina_gpu.")
+    ap.add_argument("--exhaustiveness", type=int, default=None,
+                    help="default 8 for qvina2, 16 for vina_gpu")
+    ap.add_argument("--box_size", type=float, default=22.0)
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--fpocket_bin", default="fpocket")
-    ap.add_argument("--workers", type=int, default=4,
-                    help="parallel dock jobs (careful with GPU; Vina-GPU uses 1 GPU)")
+    ap.add_argument("--workers", type=int, default=16,
+                    help="parallel dock jobs. For qvina2 CPU: set to num CPU cores. "
+                         "For vina_gpu: set to 1-2 (single GPU contention).")
+    ap.add_argument("--cpu_per_job", type=int, default=1,
+                    help="QVina2 --cpu value per job. Keep at 1 when workers=num_cores.")
     ap.add_argument("--limit", type=int, default=None, help="debug: limit N pairs")
     args = ap.parse_args()
+
+    if args.binary is None:
+        args.binary = "qvina2.1" if args.tool == "qvina2" else "vina-gpu"
+    if args.exhaustiveness is None:
+        args.exhaustiveness = 8 if args.tool == "qvina2" else 16
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -275,7 +377,12 @@ def main():
             "receptor_pdb": mani_map[uid]["structure_path"],
             "box_center": box_centers[uid],
             "out_dir": str(out_dir),
-            "vina_gpu": args.vina_gpu,
+            "tool": args.tool,
+            "binary": args.binary,
+            "exhaustiveness": args.exhaustiveness,
+            "cpu": args.cpu_per_job,
+            "seed": args.seed,
+            "box_size": args.box_size,
         })
     print(f"[dock] {len(tasks)} tasks after filter")
 

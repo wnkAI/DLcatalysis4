@@ -1,0 +1,319 @@
+OpenAI Codex v0.116.0 (research preview)
+--------
+workdir: C:\Users\wnkfr
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dba91-eaa6-7221-8cab-032aa0ed41c6
+--------
+user
+You are a practical ML/docking engineer. Concrete numbers, no hedging.
+
+QUESTION: Is QVina the right docking tool for DLcatalysis 4.0 v4-innovate
+pair-specific docking? Compare against AutoDock Vina (classic), Vina-GPU-2.1,
+DiffDock, Gnina, and Uni-Dock.
+
+CONTEXT
+-------
+Project: DLcatalysis 4.0 v4-innovate — kcat/Km regression with
+**pair-specific local complex pocket** as a core novelty.
+
+Scale: ~25,000 enzyme-substrate pairs (7,100 unique enzymes × ~3.5 substrates each).
+Each pair needs ONE docked pose to extract a 32-residue local complex pocket.
+
+Hardware: A100 40GB × 1 (dedicated). CPU cores available.
+OS: Linux server (training); local dev is Windows but docking will run on Linux.
+
+What we DO need from docking:
+  - Rough pose-level pocket definition (K=32 residues within ~8Å of ligand)
+  - Per-pair runtime fast enough to finish 25k pairs in <1 week
+  - Output: PDB/PDBQT with one top-1 pose, binding-score scalar
+  - Reasonably deterministic (reviewers can reproduce)
+
+What we DON'T need:
+  - Absolute binding affinity accuracy (ΔG in kcal/mol) — we're predicting
+    kcat/Km, not binding; docking is only a pocket anchor
+  - Multi-pose ensembles — top-1 is enough
+  - Flexibility of sidechains — we use rigid receptor
+
+YOUR TASK
+---------
+Answer concretely:
+
+1. QVina variants landscape:
+   - QVina / QVina2 / QVina-W / QVina-GPU — which one for 25k pairs?
+   - vs vanilla AutoDock Vina 1.2.x?
+   - vs Vina-GPU-2.1 (CUDA, heavily parallelized)?
+
+2. Throughput estimate for 25k pairs on A100 + 16 CPU cores:
+   - QVina2 (CPU) exhaustiveness=8:  ? seconds/pair, ? days total
+   - QVina-GPU:                       ? seconds/pair, ? days total
+   - Vina-GPU-2.1:                    ? seconds/pair, ? days total
+   - Uni-Dock (ByteDance):            ? seconds/pair, ? days total
+   - DiffDock:                         ? seconds/pair (GPU), ? days total
+
+3. Pose quality for "pocket anchoring" task:
+   - Do we lose pocket quality going from Vina → QVina2 → QVina-GPU?
+   - Any known failure modes (metal cofactors, flexible ligands)?
+   - Is the top-1 pose stable enough to define a consistent K=32 pocket?
+
+4. Reviewer-attack risk:
+   - Does using QVina instead of a newer ML docker (DiffDock, Gnina)
+     hurt the paper's positioning?
+   - Does it help (classical scoring = reproducible / audit-friendly)?
+
+5. Practical install pain:
+   - Which version builds cleanly on Linux + CUDA 12 + Python 3.10?
+   - Does it need Meeko/Open Babel for ligand prep?
+   - Any known incompatibilities with glibc / conda-forge?
+
+6. Concrete recommendation:
+   Pick ONE primary + ONE fallback, with reason. Also state your kill-switch:
+   "if X fails / takes longer than Y, switch to Z."
+
+Be concrete about seconds/pair and days. Do not hedge.
+mcp startup: no servers
+codex
+I’ll verify the current tool landscape and version details first, because Vina forks and CUDA support change enough that stale numbers would be misleading. Then I’ll give a single operational recommendation with hard throughput assumptions.
+🌐 Searching the web...
+🌐 Searched: QVina2 performance AutoDock Vina seconds docking benchmark
+🌐 Searching the web...
+🌐 Searched: AutoDock Vina 1.2.5 documentation exhaustiveness cpu threads reproducible seed
+🌐 Searching the web...
+🌐 Searched: gnina GitHub installation CUDA 12 docker conda
+🌐 Searching the web...
+🌐 Searched: QuickVina2-GPU 2.1 performance speedup Vina-GPU 2.1 seconds
+🌐 Searching the web...
+🌐 Searched: https://github.com/DeltaGroupNJUPT/Vina-GPU-2.1
+🌐 Searching the web...
+🌐 Searched: Uni-Dock GitHub install CUDA conda documentation
+🌐 Searching the web...
+🌐 Searched: https://docs.nvidia.com/nim/bionemo/diffdock/2.0.1/performance.html
+codex
+**Short Answer**
+
+No. For DLcatalysis 4.0 v4-innovate, I would not make QVina the primary docker. Use **Uni-Dock** as primary and **QVina2 CPU** as fallback.
+
+QVina2 is good enough for pocket anchoring, but on one A100 it leaves too much throughput on the table. Uni-Dock gives Vina-like rigid docking, Vina/Vinardo/AD4 scoring, batch GPU throughput, cleaner install via conda, and still looks classical and reproducible to reviewers.
+
+**1. QVina Landscape**
+
+| Tool | Use for 25k pair-specific docking? | Verdict |
+|---|---:|---|
+| QVina / QVina1 | No | Old heuristic; lower reliability at low exhaustiveness. |
+| QVina2 | Yes, CPU fallback | Good Vina-compatible fast CPU baseline. Published average 2.3x faster than Vina, up to 20.5x, first-mode score correlation 0.967 vs Vina. |
+| QVina-W | No | Built for blind/wide-box docking; not needed for local pair-specific pockets. |
+| QVina-GPU / QuickVina2-GPU | Maybe | Fast, but less clean operationally than Uni-Dock; use only if Uni-Dock blocked. |
+| AutoDock Vina 1.2.x | Good baseline, not primary | Most defensible, slower. |
+| Vina-GPU-2.1 | Strong speed, higher install friction | Good but OpenCL/CUDA/Boost build is more painful than Uni-Dock. |
+| Uni-Dock | Best primary | GPU batch docking, Vina-family scoring, conda-forge package. |
+| DiffDock | No for this use | ML pose generator, no Vina-like binding scalar, weaker reproducibility story. |
+| Gnina | No as primary | Better pose ranking in some benchmarks, but slower/heavier; good validation subset only. |
+
+**2. Throughput Estimate**
+
+Assumption: local box, rigid receptor, one top pose, exhaustiveness/search-depth equivalent to Vina default-ish local docking, receptor/ligand prep excluded.
+
+| Tool | Seconds / pair | 25k total |
+|---|---:|---:|
+| QVina2 CPU, `exhaustiveness=8`, 16 CPU cores | **20 s/pair** | **5.8 days** |
+| QVina-GPU / QuickVina2-GPU | **3.0 s/pair** | **0.87 days** |
+| Vina-GPU-2.1 | **1.2 s/pair** | **0.35 days** |
+| Uni-Dock | **0.35 s/pair** | **0.10 days = 2.4 h** |
+| DiffDock GitHub on A100 | **1.4 s/pair** | **0.41 days** |
+| DiffDock NVIDIA NIM optimized | **0.25 s/pair** | **0.07 days = 1.7 h** |
+
+Operationally, include prep, I/O, failed cases, queue overhead, and reruns:
+
+| Tool | Real campaign wall clock |
+|---|---:|
+| QVina2 CPU | **6-7 days** |
+| Vina-GPU-2.1 | **0.5-1 day** |
+| Uni-Dock | **0.5 day** |
+| DiffDock | **0.5-1.5 days**, but wrong output semantics for this project |
+
+**3. Pose Quality For Pocket Anchoring**
+
+For your goal, QVina2 is fine.
+
+You are not using docking as truth for affinity. You need a ligand-centered residue selector: 32 residues within about 8 Å. For that, Vina -> QVina2 causes little practical loss. QVina2 was designed to preserve Vina-like results while pruning unnecessary local searches; published first-mode energy correlation with Vina is 0.967.
+
+Expected pocket-anchor quality:
+
+| Tool | Pocket-anchor quality |
+|---|---|
+| Vina 1.2.x | Good classical baseline |
+| QVina2 | Same enough for K=32 pocket extraction |
+| QVina-GPU / Vina-GPU | Same family, minor stochastic differences |
+| Uni-Dock | Same family, best throughput |
+| Gnina | Often better pose ranking, but heavier |
+| DiffDock | Can be good pose-wise, but less aligned with Vina-style scalar scoring and deterministic audit |
+
+Known failure modes:
+
+| Failure mode | Impact |
+|---|---|
+| Metal cofactors, heme, Fe-S, Zn, Mg active sites | Classical Vina-family scoring often mishandles coordination geometry. Flag and treat separately. |
+| Covalent or near-covalent substrates | Docking pose may be chemically wrong. Use template/constraint or skip docking score interpretation. |
+| Very flexible ligands, >12 rotatable bonds | Top-1 instability increases. Raise exhaustiveness/search depth or use consensus for flagged cases. |
+| Large solvent-exposed pockets | Top-1 may drift; define local box from known/putative active site, not whole protein. |
+| Protonation/tautomer errors | Bigger effect than docker choice. Standardize ligand prep. |
+
+Top-1 pose is stable enough for K=32 pocket extraction if you use fixed seeds, fixed boxes, fixed protonation, and fixed binaries. I would run a 500-pair reproducibility check and require **Jaccard overlap >=0.75** for the K=32 residue set across two seeds. Anything below that gets rerun at higher search depth.
+
+**4. Reviewer Risk**
+
+Using QVina alone slightly hurts positioning because reviewers can ask why you used an older acceleration fork when GPU batch dockers exist.
+
+Using Uni-Dock helps positioning: it is fast, Vina-family, reproducible, and audit-friendly. It avoids the “black-box ML docker defines your novelty” criticism.
+
+DiffDock/Gnina do not help your core story. Your novelty is **pair-specific local complex pocket for kcat/Km regression**, not state-of-the-art pose prediction. ML dockers add confounds: learned docking model, versioned weights, confidence score instead of classical ΔG-like scalar, and harder reproducibility.
+
+Best reviewer framing:
+
+> Docking was used only to define a local enzyme-substrate contact neighborhood, not to predict binding affinity. We therefore used a deterministic Vina-family rigid docking workflow optimized for high-throughput pocket anchoring.
+
+**5. Install Pain**
+
+| Tool | Linux + CUDA 12 + Python 3.10 |
+|---|---|
+| Uni-Dock | Cleanest. `conda install conda-forge::unidock`. Conda-forge has Linux builds. |
+| AutoDock Vina 1.2.x | Clean. `conda install -c conda-forge vina meeko rdkit openbabel`. |
+| QVina2 | CPU C++ build; usually manageable, but older code/Boost friction possible. |
+| Vina-GPU-2.1 | More painful. Needs Boost, CUDA/OpenCL setup, Makefile edits, OpenCL binary path, stack size. |
+| Gnina | Heavy. CUDA >=12, Caffe/cuDNN/OpenBabel/RDKit dependencies; binary/Docker preferred. |
+| DiffDock | Python/torch stack; fine in containers, annoying for long-term reproducibility unless pinned hard. |
+
+Yes, you need ligand/receptor prep. Use **Meeko + RDKit/Open Babel** for Vina-family PDBQT generation. For enzymes with cofactors/metals, preserve cofactors explicitly in receptor prep or maintain a separate flagged workflow.
+
+**6. Concrete Recommendation**
+
+Primary: **Uni-Dock**
+
+Reason: fastest practical option on one A100, Vina-family scoring, batch GPU throughput, conda install, reproducible enough, and reviewer-friendly because docking is only a pocket anchor.
+
+Fallback: **QVina2 CPU**
+
+Reason: published, simple, classical, no GPU dependency, finishes 25k in about **6-7 days** on 16 CPU cores, and gives Vina-like pockets.
+
+Kill-switch:
+
+> Start with Uni-Dock. If install plus a 1,000-pair pilot is not complete within **24 hours**, or if median throughput is worse than **2.0 s/pair**, switch to QVina2 CPU. If QVina2 exceeds **30 s/pair median**, reduce exhaustiveness to 4 for non-flagged pairs and rerun only unstable/metal/flexible cases at exhaustiveness 16.
+
+Sources used: QuickVina2 paper and repo, AutoDock Vina docs, Vina-GPU-2.1 repo, Uni-Dock paper/repo/conda-forge, Gnina paper/repo, NVIDIA DiffDock NIM benchmarks.
+tokens used
+59,875
+**Short Answer**
+
+No. For DLcatalysis 4.0 v4-innovate, I would not make QVina the primary docker. Use **Uni-Dock** as primary and **QVina2 CPU** as fallback.
+
+QVina2 is good enough for pocket anchoring, but on one A100 it leaves too much throughput on the table. Uni-Dock gives Vina-like rigid docking, Vina/Vinardo/AD4 scoring, batch GPU throughput, cleaner install via conda, and still looks classical and reproducible to reviewers.
+
+**1. QVina Landscape**
+
+| Tool | Use for 25k pair-specific docking? | Verdict |
+|---|---:|---|
+| QVina / QVina1 | No | Old heuristic; lower reliability at low exhaustiveness. |
+| QVina2 | Yes, CPU fallback | Good Vina-compatible fast CPU baseline. Published average 2.3x faster than Vina, up to 20.5x, first-mode score correlation 0.967 vs Vina. |
+| QVina-W | No | Built for blind/wide-box docking; not needed for local pair-specific pockets. |
+| QVina-GPU / QuickVina2-GPU | Maybe | Fast, but less clean operationally than Uni-Dock; use only if Uni-Dock blocked. |
+| AutoDock Vina 1.2.x | Good baseline, not primary | Most defensible, slower. |
+| Vina-GPU-2.1 | Strong speed, higher install friction | Good but OpenCL/CUDA/Boost build is more painful than Uni-Dock. |
+| Uni-Dock | Best primary | GPU batch docking, Vina-family scoring, conda-forge package. |
+| DiffDock | No for this use | ML pose generator, no Vina-like binding scalar, weaker reproducibility story. |
+| Gnina | No as primary | Better pose ranking in some benchmarks, but slower/heavier; good validation subset only. |
+
+**2. Throughput Estimate**
+
+Assumption: local box, rigid receptor, one top pose, exhaustiveness/search-depth equivalent to Vina default-ish local docking, receptor/ligand prep excluded.
+
+| Tool | Seconds / pair | 25k total |
+|---|---:|---:|
+| QVina2 CPU, `exhaustiveness=8`, 16 CPU cores | **20 s/pair** | **5.8 days** |
+| QVina-GPU / QuickVina2-GPU | **3.0 s/pair** | **0.87 days** |
+| Vina-GPU-2.1 | **1.2 s/pair** | **0.35 days** |
+| Uni-Dock | **0.35 s/pair** | **0.10 days = 2.4 h** |
+| DiffDock GitHub on A100 | **1.4 s/pair** | **0.41 days** |
+| DiffDock NVIDIA NIM optimized | **0.25 s/pair** | **0.07 days = 1.7 h** |
+
+Operationally, include prep, I/O, failed cases, queue overhead, and reruns:
+
+| Tool | Real campaign wall clock |
+|---|---:|
+| QVina2 CPU | **6-7 days** |
+| Vina-GPU-2.1 | **0.5-1 day** |
+| Uni-Dock | **0.5 day** |
+| DiffDock | **0.5-1.5 days**, but wrong output semantics for this project |
+
+**3. Pose Quality For Pocket Anchoring**
+
+For your goal, QVina2 is fine.
+
+You are not using docking as truth for affinity. You need a ligand-centered residue selector: 32 residues within about 8 Å. For that, Vina -> QVina2 causes little practical loss. QVina2 was designed to preserve Vina-like results while pruning unnecessary local searches; published first-mode energy correlation with Vina is 0.967.
+
+Expected pocket-anchor quality:
+
+| Tool | Pocket-anchor quality |
+|---|---|
+| Vina 1.2.x | Good classical baseline |
+| QVina2 | Same enough for K=32 pocket extraction |
+| QVina-GPU / Vina-GPU | Same family, minor stochastic differences |
+| Uni-Dock | Same family, best throughput |
+| Gnina | Often better pose ranking, but heavier |
+| DiffDock | Can be good pose-wise, but less aligned with Vina-style scalar scoring and deterministic audit |
+
+Known failure modes:
+
+| Failure mode | Impact |
+|---|---|
+| Metal cofactors, heme, Fe-S, Zn, Mg active sites | Classical Vina-family scoring often mishandles coordination geometry. Flag and treat separately. |
+| Covalent or near-covalent substrates | Docking pose may be chemically wrong. Use template/constraint or skip docking score interpretation. |
+| Very flexible ligands, >12 rotatable bonds | Top-1 instability increases. Raise exhaustiveness/search depth or use consensus for flagged cases. |
+| Large solvent-exposed pockets | Top-1 may drift; define local box from known/putative active site, not whole protein. |
+| Protonation/tautomer errors | Bigger effect than docker choice. Standardize ligand prep. |
+
+Top-1 pose is stable enough for K=32 pocket extraction if you use fixed seeds, fixed boxes, fixed protonation, and fixed binaries. I would run a 500-pair reproducibility check and require **Jaccard overlap >=0.75** for the K=32 residue set across two seeds. Anything below that gets rerun at higher search depth.
+
+**4. Reviewer Risk**
+
+Using QVina alone slightly hurts positioning because reviewers can ask why you used an older acceleration fork when GPU batch dockers exist.
+
+Using Uni-Dock helps positioning: it is fast, Vina-family, reproducible, and audit-friendly. It avoids the “black-box ML docker defines your novelty” criticism.
+
+DiffDock/Gnina do not help your core story. Your novelty is **pair-specific local complex pocket for kcat/Km regression**, not state-of-the-art pose prediction. ML dockers add confounds: learned docking model, versioned weights, confidence score instead of classical ΔG-like scalar, and harder reproducibility.
+
+Best reviewer framing:
+
+> Docking was used only to define a local enzyme-substrate contact neighborhood, not to predict binding affinity. We therefore used a deterministic Vina-family rigid docking workflow optimized for high-throughput pocket anchoring.
+
+**5. Install Pain**
+
+| Tool | Linux + CUDA 12 + Python 3.10 |
+|---|---|
+| Uni-Dock | Cleanest. `conda install conda-forge::unidock`. Conda-forge has Linux builds. |
+| AutoDock Vina 1.2.x | Clean. `conda install -c conda-forge vina meeko rdkit openbabel`. |
+| QVina2 | CPU C++ build; usually manageable, but older code/Boost friction possible. |
+| Vina-GPU-2.1 | More painful. Needs Boost, CUDA/OpenCL setup, Makefile edits, OpenCL binary path, stack size. |
+| Gnina | Heavy. CUDA >=12, Caffe/cuDNN/OpenBabel/RDKit dependencies; binary/Docker preferred. |
+| DiffDock | Python/torch stack; fine in containers, annoying for long-term reproducibility unless pinned hard. |
+
+Yes, you need ligand/receptor prep. Use **Meeko + RDKit/Open Babel** for Vina-family PDBQT generation. For enzymes with cofactors/metals, preserve cofactors explicitly in receptor prep or maintain a separate flagged workflow.
+
+**6. Concrete Recommendation**
+
+Primary: **Uni-Dock**
+
+Reason: fastest practical option on one A100, Vina-family scoring, batch GPU throughput, conda install, reproducible enough, and reviewer-friendly because docking is only a pocket anchor.
+
+Fallback: **QVina2 CPU**
+
+Reason: published, simple, classical, no GPU dependency, finishes 25k in about **6-7 days** on 16 CPU cores, and gives Vina-like pockets.
+
+Kill-switch:
+
+> Start with Uni-Dock. If install plus a 1,000-pair pilot is not complete within **24 hours**, or if median throughput is worse than **2.0 s/pair**, switch to QVina2 CPU. If QVina2 exceeds **30 s/pair median**, reduce exhaustiveness to 4 for non-flagged pairs and rerun only unstable/metal/flexible cases at exhaustiveness 16.
+
+Sources used: QuickVina2 paper and repo, AutoDock Vina docs, Vina-GPU-2.1 repo, Uni-Dock paper/repo/conda-forge, Gnina paper/repo, NVIDIA DiffDock NIM benchmarks.

@@ -58,7 +58,8 @@ model:
     n_head: 4
 
   struct:
-    in_s_dim: 21          # 20 AA one-hot + 1 active-site flag
+    in_s_dim: 26          # 20 AA one-hot + pLDDT + 4 flags + min_dist_to_substrate
+                          # (from scripts/14_extract_pockets.py backbone_features_v2)
     in_v_dim: 2
     v_hidden: 16
     gvp_layers: 3

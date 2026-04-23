@@ -351,6 +351,154 @@ simple_backbone_features = backbone_features_v2
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Pair-specific pocket from docked pose (EnzymeCAGE-style, 8Å, K=32)
+# Used by scripts/24_pair_pipeline.py for v4-innovate.
+# ──────────────────────────────────────────────────────────────────────
+def _parse_pdbqt_top_pose_coords(pose_path: str) -> np.ndarray:
+    """Return (A, 3) heavy-atom coords from the FIRST model in a PDBQT file.
+    PDBQT: MODEL → ATOM lines (atom_name at col 12-16, xyz at col 30-54) → ENDMDL.
+    Ignores hydrogens.
+    """
+    coords = []
+    in_model = False
+    with open(pose_path, "r") as f:
+        for line in f:
+            if line.startswith("MODEL"):
+                in_model = True
+                continue
+            if line.startswith("ENDMDL"):
+                break  # top-1 only
+            if not in_model:
+                continue
+            if line.startswith(("ATOM", "HETATM")):
+                element = line[76:78].strip() if len(line) >= 78 else ""
+                name = line[12:16].strip()
+                # Skip hydrogens (AutoDock types: HD=polar H, H=H)
+                if element in ("H", "HD") or name.startswith("H"):
+                    continue
+                try:
+                    x = float(line[30:38])
+                    y = float(line[38:46])
+                    z = float(line[46:54])
+                    coords.append([x, y, z])
+                except ValueError:
+                    continue
+    return np.asarray(coords, dtype=np.float32) if coords else np.zeros((0, 3), dtype=np.float32)
+
+
+def extract_pocket_from_docked_pose(
+    protein_path: str,
+    pose_pdbqt_path: str,
+    uniprot_active_sites_1based: Optional[set] = None,
+    uniprot_binding_sites_1based: Optional[set] = None,
+    cofactor_atom_coords: Optional[np.ndarray] = None,
+    metal_atom_coords: Optional[np.ndarray] = None,
+    k: int = 32,
+    radius: float = 8.0,
+    k_nbr: int = 16,
+) -> Optional[dict]:
+    """Extract pocket graph from a docked pose (EnzymeCAGE-style).
+
+    Protocol:
+      1. Parse top-1 pose from pose_pdbqt → ligand heavy-atom coords.
+      2. Find all protein residues with any heavy atom within `radius` Å of
+         any ligand heavy atom.
+      3. Sort residues by ascending min(protein_heavy_atom - ligand_atom)
+         distance; take top-K.
+      4. If < k residues, pad with zero rows (mask tracks validity).
+      5. Build node_s via backbone_features_v2 (uses substrate_atom_coords=
+         ligand coords → min_dist_to_substrate gets populated correctly).
+
+    Returns None on failure (pose empty, < 5 residues in pocket, structure
+    missing atoms). Caller handles fallback cascade.
+    """
+    _, _, NeighborSearch = _import_bio()
+
+    # Parse docked ligand coords
+    lig_coords = _parse_pdbqt_top_pose_coords(pose_pdbqt_path)
+    if lig_coords.shape[0] == 0:
+        return None
+
+    # Parse protein, keep only standard residues with full backbone
+    structure = load_structure(protein_path)
+    prot_residues = get_protein_residues(structure)
+    if len(prot_residues) < 10:
+        return None
+
+    # Find residues with any heavy atom within `radius` of any ligand atom
+    all_atoms = [a for r in prot_residues for a in r.get_atoms() if a.element != "H"]
+    ns = NeighborSearch(all_atoms)
+    candidate_res = set()
+    for la_coord in lig_coords:
+        for res in ns.search(la_coord, radius, level="R"):
+            if res in prot_residues and "CA" in res:
+                candidate_res.add(res)
+    if len(candidate_res) < 5:
+        return None
+
+    # Rank by min heavy-atom distance to any ligand atom
+    def _min_dist(res):
+        heavy = np.stack(
+            [np.array(a.coord) for a in res.get_atoms() if a.element != "H"],
+            axis=0,
+        )
+        d = np.linalg.norm(heavy[:, None, :] - lig_coords[None, :, :], axis=-1)
+        return float(d.min())
+
+    ranked = sorted(candidate_res, key=_min_dist)
+    selected = ranked[:k]  # top-K (may be < K if fewer candidates)
+    k_real = len(selected)
+
+    # Build node/edge features from the selected residues (re-use v2 function)
+    feat = backbone_features_v2(
+        selected,
+        annot_resids_1based=uniprot_binding_sites_1based,
+        active_resids_1based=uniprot_active_sites_1based,
+        cofactor_atom_coords=cofactor_atom_coords,
+        metal_atom_coords=metal_atom_coords,
+        substrate_atom_coords=lig_coords,
+        k_nbr=min(k_nbr, k_real - 1),
+    )
+
+    # Pad node-level tensors to fixed size K (shape-stable for batching)
+    def _pad_nodes(x, target_len, fill=0.0):
+        if x.shape[0] >= target_len:
+            return x[:target_len]
+        pad_shape = (target_len - x.shape[0],) + x.shape[1:]
+        pad = torch.full(pad_shape, fill, dtype=x.dtype)
+        return torch.cat([x, pad], dim=0)
+
+    node_s_padded = _pad_nodes(feat["node_s"], k)
+    node_v_padded = _pad_nodes(feat["node_v"], k)
+    aa_id_padded = _pad_nodes(feat["aa_id"], k, fill=-1)
+    ca_xyz_padded = _pad_nodes(feat["ca_xyz"], k)
+    bb_xyz_padded = _pad_nodes(feat["bb_xyz"], k)
+    mask = torch.zeros(k, dtype=torch.bool)
+    mask[:k_real] = True
+
+    # Residue IDs for audit
+    residue_ids = [
+        f"{r.parent.id}:{r.id[1]}{r.id[2].strip()}:{r.resname}" for r in selected
+    ]
+
+    return {
+        "node_s": node_s_padded,
+        "node_v": node_v_padded,
+        "edge_index": feat["edge_index"],   # k_real-sized; model handles via batch
+        "edge_s": feat["edge_s"],
+        "edge_v": feat["edge_v"],
+        "aa_id": aa_id_padded,
+        "ca_xyz": ca_xyz_padded,
+        "bb_xyz": bb_xyz_padded,
+        "mask": mask,
+        "n_residues": k_real,
+        "pocket_source": "docked_pose",
+        "residue_ids": residue_ids,
+        "lig_n_atoms": int(lig_coords.shape[0]),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Driver (stub — full version wired to structure_manifest after server)
 # ──────────────────────────────────────────────────────────────────────
 def _collect_hetero_coords(structure, is_metal_fn):

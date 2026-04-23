@@ -11,10 +11,17 @@ DLcatalysis 4.0 — v4-ultimate (集大成版).
       y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
       y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
 
-    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb, annot_emb, ec)
-    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality, annot_emb)
-              init bias = -2.0 (conservative)
-    g_annot : sigmoid (annotation strength gate)
+    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb?, ec?)
+              NOTE: annot_emb is NOT fed into g_pair — the annotation branch
+              has its own dedicated g_annot (see below). Mixing annot into
+              g_pair would couple the pair-specific residual strength to
+              enzyme annotation availability.
+    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality[3], ec?)
+              quality = [n_res/K, has_active_site∨has_binding_site, has_cofactor]
+              piped from dataloader ANNOT_has_* fields (commit 2a0f337).
+              init bias = -2.0 (conservative).
+    g_annot : sigmoid over (enz_pool, annot_emb). Separate gate for the
+              annotation branch so the pair/structure branches stay clean.
 
 Optional pH/temperature conditioning: scalar features concatenated into
 enz_pool branch (EF-UniKP style).
@@ -308,9 +315,14 @@ class V4Ultimate(pl.LightningModule):
             center_flag = G.MOL_rxn_center.to(self.device).long()
             center_dense, _ = to_dense_batch(center_flag, graph_batch)  # (B, A)
             center_emb = self.rxn_center_emb(center_dense)               # (B, A, D)
-            # Add only where atom is valid
-            atom_tokens = atom_tokens + center_emb * atom_mask.unsqueeze(-1).float()
-            graph_emb = graph_emb + center_emb.mean(dim=1)
+            m = atom_mask.unsqueeze(-1).float()                          # (B, A, 1)
+            # Atom-level: add only where atom is valid
+            atom_tokens = atom_tokens + center_emb * m
+            # Graph-level: mask-aware mean over REAL atoms only (padding
+            # rxn_center_emb(0) is non-zero and would bias by ligand size)
+            masked_sum = (center_emb * m).sum(dim=1)                     # (B, D)
+            n_atoms = m.sum(dim=1).clamp(min=1.0)                        # (B, 1)
+            graph_emb = graph_emb + masked_sum / n_atoms
         return atom_tokens, graph_emb, atom_mask
 
     def _encode_rxn(self, G, B):
@@ -528,17 +540,26 @@ class V4Ultimate(pl.LightningModule):
         pred = y_pred.squeeze(-1).float()
         y_target = self._prepare_target(y_true, stage).squeeze(-1).float()
 
-        # Heteroscedastic aleatoric loss (Kendall & Gal 2017) replaces base loss
-        # when uncertainty head is enabled. Formula:
-        #   L = 0.5 * exp(-log_var) * (pred - y)^2 + 0.5 * log_var
+        loss_type = self.config["model"].get("loss_type", "logcosh")
+        # Heteroscedastic aleatoric loss (Kendall & Gal 2017) weights the
+        # per-sample error by the predicted variance. The weighted error is
+        # built on top of the configured `loss_type` (logcosh / huber / mse)
+        # so `loss_type` is respected whether uncertainty is on or off.
         if self.use_uncertainty and self._last_log_var is not None:
             log_var = self._last_log_var.squeeze(-1).float()
-            sq_err = (pred - y_target) ** 2
-            base = (0.5 * torch.exp(-log_var) * sq_err + 0.5 * log_var).mean()
+            if loss_type == "huber":
+                delta = self.config["model"].get("huber_delta", 1.0)
+                per_sample = F.huber_loss(pred, y_target, delta=delta, reduction="none")
+            elif loss_type == "logcosh":
+                d = pred - y_target
+                per_sample = d + F.softplus(-2.0 * d) - math.log(2.0)
+            else:
+                per_sample = (pred - y_target) ** 2
+            # Aleatoric weighting
+            base = (0.5 * torch.exp(-log_var) * per_sample + 0.5 * log_var).mean()
             self.log(f"{stage}_logvar_mean", log_var.mean(),
                      prog_bar=False, logger=True, sync_dist=True, batch_size=y_true.size(0))
         else:
-            loss_type = self.config["model"].get("loss_type", "logcosh")
             if loss_type == "huber":
                 base = F.huber_loss(pred, y_target,
                                     delta=self.config["model"].get("huber_delta", 1.0))

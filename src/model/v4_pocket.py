@@ -323,8 +323,16 @@ class V4Pocket(pl.LightningModule):
             n_res = pocket_mask.sum(dim=1, keepdim=True).float() / 32.0
         else:
             n_res = torch.zeros(B, 1, device=self.device)
-        has_annot = torch.zeros(B, 1, device=self.device)  # TODO: pass from dataloader
-        has_cof = torch.zeros(B, 1, device=self.device)    # TODO: pass from dataloader
+        # Pipe real quality signals from dataloader (same as v4_ultimate).
+        # ANNOT_has_any: enzyme has any InterPro/Pfam/GO/active/binding evidence.
+        # ANNOT_has_cof: cofactor column non-empty for this enzyme.
+        def _pull(name):
+            if hasattr(G, name):
+                t = getattr(G, name).to(self.device).float().view(B, 1)
+                return t
+            return torch.zeros(B, 1, device=self.device)
+        has_annot = _pull("ANNOT_has_any")
+        has_cof   = _pull("ANNOT_has_cof")
         struct_quality = torch.cat([n_res, has_annot, has_cof], dim=-1)  # (B, 3)
 
         gate_struct_in = torch.cat([enz_pool, graph_emb, pocket_pool, struct_quality], dim=-1)

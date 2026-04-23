@@ -1,0 +1,283 @@
+OpenAI Codex v0.116.0 (research preview)
+--------
+workdir: E:\AImodel\DLcatalysis4.0
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbcae-b971-7000-97ea-c1d6f9347a86
+--------
+user
+Verify round-4 fixes. Bugs only. End APPROVED/NEEDS_WORK/BLOCK.
+mcp startup: no servers
+codex
+I’m reviewing the round-4 changes as a bug-focused verification pass. I’ll inspect the current diff and the touched areas, then I’ll report only concrete findings and end with `APPROVED`, `NEEDS_WORK`, or `BLOCK`.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --name-only' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --stat' in E:\AImodel\DLcatalysis4.0 succeeded in 404ms:
+
+ succeeded in 407ms:
+?? REVIEWS/nac_modality_round5_2026-04-24/
+ succeeded in 380ms:
+
+codex
+The worktree is clean apart from an untracked review folder, so I’m switching to commit-level inspection to identify the round-4 fix set and verify those changes directly.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git log --oneline --decorate -n 12' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Force REVIEWS | Select-Object Name,LastWriteTime' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Force REVIEWS | Select-Object Name,LastWriteTime'` rejected: blocked by policy
+ succeeded in 392ms:
+e344130 (HEAD -> master) /five round-4 fixes: per-field annotation fallback + preserve num_graphs=0
+b651165 /five round-3 fixes: full None-guard sweep + kept-subset diagnostic
+702fedc /five round-2 fixes: split dropout mask + complete None guards + gate dims
+69d1f94 /five round-1 fixes: 10 bugs from NAC + modality dropout review
+18345ef v4-ultimate: NAC bias in int3d cross-attn + training-time modality dropout
+4f88914 (origin/master) v4-ultimate: diagnostics + ablation matrix + per-file audit
+3309c17 Fix 4 issues found in reviewer audit (2026-04-23)
+cb3a37f Pair-specific pocket docking pipeline (EnzymeCAGE-style 8A + K=32)
+0ea39f5 Docking: QVina2 primary (CPU) + Vina-GPU-2.1 fallback — per /five analysis
+9eafee0 Add v4-innovate: 3 novel-contribution components on top of 3.0 baseline
+86ee8a9 Add 3 log10 targets + Murcko scaffold IDs (v5 data prep gap 1+2)
+14c0f26 v5 step 1: enzyme group dataloader prep (catalytic discrimination)
+codex
+I found the round-4 commit at `e344130`. Next I’m reviewing that commit against `b651165` and checking the surrounding code paths for regressions or incomplete fixes.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "num_graphs|annotation fallback|per-field|annotations|fallback" -S .' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff b651165..e344130 --' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show --stat --oneline --decorate e344130' in E:\AImodel\DLcatalysis4.0 succeeded in 403ms:
+diff --git a/REVIEWS/nac_modality_round4_2026-04-24/BRIEF.md b/REVIEWS/nac_modality_round4_2026-04-24/BRIEF.md
+new file mode 100644
+index 0000000..126128d
+--- /dev/null
++++ b/REVIEWS/nac_modality_round4_2026-04-24/BRIEF.md
+@@ -0,0 +1,63 @@
++# /five round-4 brief — verify round-3 fixes
++
++Round-3 review found 2 remaining issues on commit 702fedc (round-2 fixes).
++Commit `b651165 "round-3 fixes"` claims to fix them. Verify.
++
++Repo: `E:/AImodel/DLcatalysis4.0`
++Diff: `REVIEWS/nac_modality_round4_2026-04-24/diff.patch` (230 lines).
++
++## Round-3 fix list
++
++| ID | Round-3 claim |
++|----|---------------|
++| D  | Every remaining `hasattr(G, "...")` in v4_ultimate.py replaced by `getattr(G, "...", None) is not None`, so present-but-None attrs no longer crash the forward path. `grep "hasattr(G, "` should return 0 matches. |
++| E  | `y_pre` now stores `(tensor, mask01)` tuples. `_log_diag` computes kept-subset weighted mean so dropped samples' head(0)=head_bias doesn't underestimate branch magnitude. |
+ succeeded in 409ms:
+e344130 (HEAD -> master) /five round-4 fixes: per-field annotation fallback + preserve num_graphs=0
+ REVIEWS/nac_modality_round4_2026-04-24/BRIEF.md    |  63 +++
+ REVIEWS/nac_modality_round4_2026-04-24/codex.txt   | 336 +++++++++++++++
+ .../nac_modality_round4_2026-04-24/deepseek.txt    |  28 ++
+ REVIEWS/nac_modality_round4_2026-04-24/diff.patch  | 230 ++++++++++
+ REVIEWS/nac_modality_round4_2026-04-24/gemini.txt  |   5 +
+ REVIEWS/nac_modality_round4_2026-04-24/kimi.txt    | 473 +++++++++++++++++++++
+ src/model/v4_ultimate.py                           |  35 +-
+ 7 files changed, 1157 insertions(+), 13 deletions(-)
+ succeeded in 540ms:
+.\PLAN.md:71:- AlphaFill missing for ~10% of UniProts → fallback to AlphaFold only
+.\PLAN_v2.md:10:7. Missing-structure mask for AlphaFold-only fallback
+.\PLAN_v2.md:54:- Active-site mask from UniProt annotations (if available)
+.\README_SERVER.md:117:# InterPro/Pfam/GO annotations (CPU, <1 min)
+.\README_SERVER.md:118:python scripts/21_parse_annotations.py \
+.\README_SERVER.md:120:  --out_pt data/processed/enzyme_annotations.pt \
+.\README_SERVER.md:124:注：[data/processed/annotation_vocabs.json](data/processed/annotation_vocabs.json) 已经在仓库里（committed），但 `enzyme_annotations.pt` 是大文件（.gitignore 排除），所以**必须在服务器上重跑 21 脚本**。
+.\README_SERVER.md:234:先确保 Step 3b 已跑完（DRFP + RXNMapper + annotations）。
+.\config\v4_ultimate.yml:28:  annotations_pt:      data/processed/enzyme_annotations.pt
+.\config\v4_pocket.yml:22:  annotations_pt:      data/processed/enzyme_annotations.pt
+.\REVIEWS\AUDIT_PERFILE.md:32:- **Purpose.** 4-branch (seq + sub + rxn + pocket) model — predecessor to v4_ultimate, still used as fallback config.
+.\REVIEWS\AUDIT_PERFILE.md:88:- **Risks.** Pocket source tagging (`docked_pose` vs fallback) is used by 25's fallback-rate check — any new fallback path must set `pocket_source` explicitly.
+.\REVIEWS\AUDIT_PERFILE.md:103:- **Risks.** QVina2 timeout fallback; any silent failure must emit `run_status` row so 25 catches the coverage hit.
+.\REVIEWS\AUDIT_PERFILE.md:106:### 21_parse_annotations.py (status: OK)
+.\REVIEWS\AUDIT_PERFILE.md:107:- Ingests InterPro / Pfam / GO into `enzyme_annotations.pt` + vocab JSON.
+.\REVIEWS\codex_review_2026-04-22.txt:245:"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "rxn_drfp_npy|rxn_drfp_keys_csv|rxn_center_pt|annotations_pt|annotation_vocab|pocket_path|mol_graph_path" -S config src train' in E:\AImodel\DLcatalysis4.0exec
+.\REVIEWS\codex_review_2026-04-22.txt:246:"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \"use_rxn\\|use_pocket\\|use_int3d\\|use_annot\\|use_condition\\|gate_init_bias\\|rxn_drfp\\|rxn_center\\|annotations\\|pocket_path\" config\\v4_ultimate.yml" in E:\AImodel\DLcatalysis4.0exec
+.\REVIEWS\codex_review_2026-04-22.txt:262:config\v4_ultimate.yml:28:  annotations_pt:      data/processed/enzyme_annotations.pt
+.\REVIEWS\codex_review_2026-04-22.txt:273:src\util\data_module.py:201:            ann_path = config["data"].get("annotations_pt")
+.\REVIEWS\codex_review_2026-04-22.txt:324:"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Test-Path data\\processed\\enzyme_annotations.pt" in E:\AImodel\DLcatalysis4.0exec
+codex
+I’ve confirmed the intended fixes landed in the current head. I’m doing one more pass on the annotation path against the dataset collation code, because that’s the only place a shape regression would hide.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round5_2026-04-24\\BRIEF.md" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 5 \"def _encode_annot|embed_dim = self.ipr_emb.embedding_dim|def forward\\(|B = getattr\\(G, \\\"num_graphs\\\", 1\\)|return self.annot_proj|torch.zeros\\(B, embed_dim\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 5 \"ipr_ids|pf_ids|go_ids|has_any_annot|_get_annot|Annotations \\(bag-of-words padded to fixed K\\)\" src/util/data_module.py" in E:\AImodel\DLcatalysis4.0 exited 1 in 367ms:
+rg: 1\)|return: 系统找不到指定的路径。 (os error 3)
+rg: self.annot_proj|torch.zeros\(B,: 文件名、目录名或卷标语法不正确。 (os error 123)
+rg: embed_dim src/model/v4_ultimate.py: 系统找不到指定的路径。 (os error 3)
+ succeeded in 383ms:
+343-
+344-    def _load_annot(self, seq_id: str) -> dict:
+345-        """Return dict with ipr/pf/go ids (padded to max_fam) + quality flags."""
+346-        K = self.max_fam_per_enzyme
+347-        empty = {
+348:            "ipr_ids": torch.zeros(K, dtype=torch.long),
+349:            "pf_ids":  torch.zeros(K, dtype=torch.long),
+350:            "go_ids":  torch.zeros(K, dtype=torch.long),
+351:            "has_any_annot": torch.zeros(1, dtype=torch.float32),
+352-            "has_active_site": torch.zeros(1, dtype=torch.float32),
+353-            "has_binding_site": torch.zeros(1, dtype=torch.float32),
+354-            "has_cofactor": torch.zeros(1, dtype=torch.float32),
+355-        }
+356-        if not self.use_annot or self.annotations is None:
+--
+363-            ids = [vocab_map.get(i, 0) for i in id_set]
+364-            ids = [x for x in ids if x > 0][:K]
+365-            ids = ids + [0] * (K - len(ids))
+366-            return torch.tensor(ids, dtype=torch.long)
+367-
+ succeeded in 393ms:
+# /five round-5 brief 鈥?verify round-4 fixes
+
+Round-4 review on commit `b651165` flagged 2 issues. Commit `e344130
+"round-4 fixes"` addresses them. Verify.
+
+Diff: `REVIEWS/nac_modality_round5_2026-04-24/diff.patch` (60 lines,
+src/ only).
+
+## Round-4 fix list
+
+| ID | Round-4 finding | Round-4 fix |
+|----|-----------------|-------------|
+| F  | `_encode_annot` zeroed the whole branch when *any* one of ANNOT_ipr_ids / ANNOT_pf_ids / ANNOT_go_ids was None | Per-field degrade: the branch is dark only when all three are None; missing fields contribute a zero (B, embed_dim) pool while present fields are pooled normally |
+| G  | `B = getattr(G, "num_graphs", None) or 1` silently coerced `num_graphs=0` to 1 | Changed to `B = getattr(G, "num_graphs", 1)` so explicit 0 is preserved |
+
+## What to check
+
+1. **Fix F (annot per-field).** For partial annotations:
+   - ipr present, pf & go None 鈫?pooled ipr + zeros + zeros 鈫?annot_proj
+     gets `(B, embed_dim + 0 + 0)` ? 鈥?check that the concatenated input
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 6 \"def _encode_annot\\(\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 4 \"def forward\\(|B = getattr\\(G, \\\"num_graphs\\\", 1\\)\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 6 \"embed_dim = self.ipr_emb.embedding_dim|def _bag_pool\\(|ipr_pool = _bag_pool|return self.annot_proj\\(cat\\)\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0 succeeded in 364ms:
+415-        is_aa = node_s[:, cat_idx].sum(dim=-1).clamp(max=1.0)     # (N_total,)
+416-        cat_score = torch.maximum(is_annot, 0.5 * is_aa)
+417-        cat_dense, _ = to_dense_batch(cat_score, batch)           # (B, K)
+418-
+419-        return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
+420-
+421:    def _encode_annot(self, G, B):
+422-        if not self.use_annot:
+423-            return torch.zeros(B, self.hidden_dim, device=self.device)
+424-        _ipr = getattr(G, "ANNOT_ipr_ids", None)
+425-        _pf  = getattr(G, "ANNOT_pf_ids",  None)
+426-        _go  = getattr(G, "ANNOT_go_ids",  None)
+427-        # If every annotation field is missing, the whole branch is dark.
+ exited 1 in 375ms:
+rg: 1\) src/model/v4_ultimate.py: IO error for operation on 1\) src/model/v4_ultimate.py: 系统找不到指定的路径。 (os error 3)
+ succeeded in 385ms:
+427-        # If every annotation field is missing, the whole branch is dark.
+428-        if _ipr is None and _pf is None and _go is None:
+429-            return torch.zeros(B, self.hidden_dim, device=self.device)
+430-        # Per-family degrade: if one of {interpro, pfam, GO} is missing while
+431-        # the others are present, use a zero pool for the missing field only
+432-        # instead of zeroing the entire annotation branch.
+433:        embed_dim = self.ipr_emb.embedding_dim
+434:        def _bag_pool(ids_tensor, emb_layer):
+435-            if ids_tensor is None:
+436-                return torch.zeros(B, embed_dim, device=self.device)
+437-            ids = ids_tensor.to(self.device).view(B, -1)  # (B, max_fam)
+438-            e = emb_layer(ids)                            # (B, L, D)
+439-            m = (ids > 0).float().unsqueeze(-1)           # (B, L, 1)
+440-            s = (e * m).sum(dim=1)
+441-            n = m.sum(dim=1).clamp(min=1.0)
+442-            return s / n
+443:        ipr_pool = _bag_pool(_ipr, self.ipr_emb)
+444-        pf_pool  = _bag_pool(_pf,  self.pf_emb)
+445-        go_pool  = _bag_pool(_go,  self.go_emb)
+446-        cat = torch.cat([ipr_pool, pf_pool, go_pool], dim=-1)
+codex
+The annotation fallback is implemented as intended. I’m checking one last structural assumption: whether `ipr/pf/go` embedding widths are guaranteed equal, since the new zero-pool path keys off `self.ipr_emb.embedding_dim`.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "findstr /n \"def forward(self, G):\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 3 \"annot_dim|embed_dim|Embedding\\(\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 4 \"self\\.ipr_emb|self\\.pf_emb|self\\.go_emb|self\\.annot_proj\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0 succeeded in 383ms:
+60:    def __init__(self, config):
+210:        def _mkhead(in_dim):
+283:    def _init_weights(self):
+294:    def _attn_pool_seq(self, feat, mask, pool_head):
+301:    def _encode_enzyme(self, G, B):
+317:    def _encode_substrate(self, G, B):
+364:    def _encode_rxn(self, G, B):
+378:    def _encode_pocket(self, G, B):
+421:    def _encode_annot(self, G, B):
+434:        def _bag_pool(ids_tensor, emb_layer):
+449:    def _encode_condition(self, G, B):
+467:    def _encode_ec(self, G, B):
+483:    def forward(self, G):
+521:        def _masks(p):
+675:        # are not deflated by the dropout probability. Guarded so the
+690:    def _log_diag(self, *, B, G, y_pre,
+693:        def _log(name, value):
+748:    def _prepare_target(self, y_true, stage):
+756:    def _pairwise_ranking(self, pred, target, ids, margin, min_diff=0.1, max_pairs=16):
+761:        from collections import defaultdict
+ succeeded in 393ms:
+170-            pf_n  = vocab.get("pfam_family_vocab", 3000)
+171-            go_n  = vocab.get("go_term_vocab", 2000)
+172-            embed_dim = vocab.get("embed_dim", 32)
+173-            # padding_idx=0 reserved for "unknown"
+174:            self.ipr_emb = nn.Embedding(ipr_n + 1, embed_dim, padding_idx=0)
+175:            self.pf_emb  = nn.Embedding(pf_n  + 1, embed_dim, padding_idx=0)
+176:            self.go_emb  = nn.Embedding(go_n  + 1, embed_dim, padding_idx=0)
+177:            self.annot_proj = nn.Sequential(
+178-                nn.Linear(3 * embed_dim, self.hidden_dim),
+179-                nn.LayerNorm(self.hidden_dim),
+180-                nn.LeakyReLU(),
+181-                nn.Dropout(self.dropout_rate),
+--
+429-            return torch.zeros(B, self.hidden_dim, device=self.device)
+430-        # Per-family degrade: if one of {interpro, pfam, GO} is missing while
+431-        # the others are present, use a zero pool for the missing field only
+432-        # instead of zeroing the entire annotation branch.
+433:        embed_dim = self.ipr_emb.embedding_dim
+434-        def _bag_pool(ids_tensor, emb_layer):
+435-            if ids_tensor is None:
+ succeeded in 393ms:
+124-        # is disabled the embedding is never consumed.
+125-        if self.use_rxn_center and self.use_substrate:
+126-            # Input: 1-dim boolean mask → small embedding added to atom tokens post-GINE
+127:            self.rxn_center_emb = nn.Embedding(2, self.hidden_dim)
+128-
+129-        # ── DRFP reaction fingerprint branch ──────────────────────────
+130-        if self.use_rxn_drfp:
+--
+169-            ipr_n = vocab.get("interpro_family_vocab", 6000)
+170-            pf_n  = vocab.get("pfam_family_vocab", 3000)
+171-            go_n  = vocab.get("go_term_vocab", 2000)
+172:            embed_dim = vocab.get("embed_dim", 32)
+173-            # padding_idx=0 reserved for "unknown"
+174:            self.ipr_emb = nn.Embedding(ipr_n + 1, embed_dim, padding_idx=0)
+175:            self.pf_emb  = nn.Embedding(pf_n  + 1, embed_dim, padding_idx=0)
+176:            self.go_emb  = nn.Embedding(go_n  + 1, embed_dim, padding_idx=0)
+177-            self.annot_proj = nn.Sequential(
+178:                nn.Linear(3 * embed_dim, self.hidden_dim),
+179-                nn.LayerNorm(self.hidden_dim),
+180-                nn.LeakyReLU(),
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n -C 4 "num_graphs" src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0 succeeded in 348ms:
+481-    # Forward
+482-    # ──────────────────────────────────────────────────────────────
+483-    def forward(self, G):
+484-        # Using `getattr(..., 1)` directly (not `... or 1`) so an explicit
+485:        # num_graphs=0 is preserved rather than silently coerced to 1. An
+486-        # empty batch is degenerate downstream either way, but preserving
+487-        # the input value makes the failure mode easier to diagnose.
+488:        B = getattr(G, "num_graphs", 1)
+489-        _y = getattr(G, "y", None)
+490-        if _y is not None and _y.device != self.device:
+491-            G.y = _y.to(self.device)
+492-
+codex
+- No bugs found.
+
+APPROVED
+tokens used
+38,584
+- No bugs found.
+
+APPROVED

@@ -1,0 +1,8 @@
+Loaded cached credentials.
+- **Fix F (annot per-field)**: The conditional pooling logic correctly uses `torch.zeros(B, embed_dim)` when a field is `None`. This preserves the required `(B, 3 * embed_dim)` shape for the `annot_proj` linear layer regardless of which combinations of annotation fields are present.
+- **Fix G (explicit 0 preservation)**: Changing to `getattr(G, "num_graphs", 1)` successfully evaluates an explicit `0` to `0`, while falling back to `1` only if the attribute is genuinely missing.
+- **Regressions (Zero-padding)**: A fully padded sequence where all entries are `0` creates an all-zeros mask. The denominator clamp (`clamp(min=1.0)`) safely prevents division by zero, returning a mathematically correct zero pool of shape `(B, embed_dim)`.
+- **Regressions (Empty Batches)**: If `B=0`, all PyTorch operations (including `torch.zeros(0, embed_dim)` and empty-batch embedding/linear layers) naturally produce zero-sized tensors (`0, D`), propagating gracefully without crashing.
+- No bugs found.
+
+APPROVED

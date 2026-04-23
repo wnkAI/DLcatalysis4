@@ -1,0 +1,7 @@
+- **Fix F (annot per-field)**: Correct. `_bag_pool` returns `(B, embed_dim)` when `ids_tensor is None`, so concatenation produces `(B, 3 * embed_dim)` for partial annotations. Early return of zeros only when all three are None. ✅
+- **Fix G**: `getattr(G, "num_graphs", 1)` correctly preserves explicit 0 and defaults to 1 when attribute is missing. ✅
+- **No regressions found**: Fully-padded inputs produce zero pools via mask logic, no division issues. All paths handle device placement correctly.
+
+No bugs found.
+
+APPROVED

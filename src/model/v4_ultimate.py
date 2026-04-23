@@ -491,7 +491,60 @@ class V4Ultimate(pl.LightningModule):
         else:
             self._last_log_var = None
 
+        # ── Diagnostics ──
+        # Emits branch magnitudes, gate means, and modality coverage once a
+        # trainer is attached. Guarded so the model still runs standalone
+        # (unit tests / scripted inference) without a Lightning trainer.
+        if getattr(self, "_trainer", None) is not None:
+            self._log_diag(
+                B=B, G=G,
+                y_seq=y_seq, y_sub=y_sub, y_rxn=y_rxn,
+                y_int3d=y_int3d, y_struct=y_struct, y_annot=y_annot,
+                g_pair=g_pair, g_struct=g_struct, g_annot=g_annot,
+                atom_mask=atom_mask, pocket_mask=pocket_mask,
+            )
+
         return pred, G.y
+
+    # ──────────────────────────────────────────────────────────────
+    # Diagnostics
+    # ──────────────────────────────────────────────────────────────
+    def _log_diag(self, *, B, G,
+                  y_seq, y_sub, y_rxn, y_int3d, y_struct, y_annot,
+                  g_pair, g_struct, g_annot,
+                  atom_mask, pocket_mask):
+        def _log(name, value):
+            self.log(f"diag/{name}", value,
+                     on_step=False, on_epoch=True,
+                     sync_dist=True, batch_size=B)
+
+        # Branch magnitudes (mean |y_*|) — tells you which branch dominates pred
+        _log("y_seq_abs",    y_seq.detach().abs().mean())
+        _log("y_sub_abs",    y_sub.detach().abs().mean())
+        _log("y_rxn_abs",    y_rxn.detach().abs().mean())
+        _log("y_int3d_abs",  y_int3d.detach().abs().mean())
+        _log("y_struct_abs", y_struct.detach().abs().mean())
+        _log("y_annot_abs",  y_annot.detach().abs().mean())
+
+        # Gate means — tells you how much each branch is actually mixed in
+        _log("g_pair_mean",   g_pair.detach().mean())
+        _log("g_struct_mean", g_struct.detach().mean())
+        _log("g_annot_mean",  g_annot.detach().mean())
+
+        # Modality coverage (fraction of the batch with real signal)
+        has_rxn = float(hasattr(G, "RXN_drfp"))
+        has_atoms = float(atom_mask.any().item()) if atom_mask is not None else 0.0
+        has_pocket = float(pocket_mask.any().item()) if pocket_mask is not None else 0.0
+        _log("cov_rxn_drfp", torch.tensor(has_rxn, device=self.device))
+        _log("cov_atoms",    torch.tensor(has_atoms, device=self.device))
+        _log("cov_pocket",   torch.tensor(has_pocket, device=self.device))
+
+        if hasattr(G, "ANNOT_has_any"):
+            _log("cov_annot", G.ANNOT_has_any.float().mean())
+        if hasattr(G, "ANNOT_has_cof"):
+            _log("cov_cof", G.ANNOT_has_cof.float().mean())
+        if hasattr(G, "MOL_graph_xyz_valid"):
+            _log("cov_mol_xyz", G.MOL_graph_xyz_valid.float().mean())
 
     # ──────────────────────────────────────────────────────────────
     # Loss / metrics / steps — identical machinery as v4_pocket

@@ -1,0 +1,28 @@
+**Fix D — zero hasattr remaining.**  
+- `_encode_enzyme`: `hasattr` replaced with `getattr(..., None)` ✅  
+- `_encode_substrate`: `hasattr` replaced ✅  
+- `_encode_rxn`: `hasattr` replaced ✅  
+- `_encode_pocket`: `hasattr` replaced ✅  
+- `_encode_annot`: `hasattr` replaced ✅  
+- `_encode_condition`: both `hasattr` calls replaced ✅  
+- `_encode_ec`: `hasattr` replaced ✅  
+- `forward`: `hasattr(G, "num_graphs")` and `hasattr(G, "y")` replaced ✅  
+- `training_step`: both `hasattr` calls replaced ✅  
+- **No remaining `hasattr(G, ...)` in file.** ✅
+
+**Fix E — kept-subset mean.**  
+- `y_pre` now stores `(tensor, mask01)` tuples ✅  
+- `_log_diag` computes `(t.abs() * w).sum() / w.sum().clamp(1)` — correct kept-subset mean ✅  
+- Edge case `w.sum()=0` → denominator clamped to 1 → result 0, acceptable ✅
+
+**Regressions.**  
+- `_encode_annot` bails if *any* of `ANNOT_ipr_ids`, `ANNOT_pf_ids`, `ANNOT_go_ids` is None. This is stricter than before (which only checked `ANNOT_ipr_ids`). If `pf_ids` or `go_ids` are legitimately absent while `ipr_ids` is present, this silently zeros the annotation branch. **Potential regression** — should check each independently with default zeros.  
+- `B = getattr(G, "num_graphs", None) or 1` — if `num_graphs=0` (empty batch), falls back to 1. This is incorrect; should be `getattr(...) if getattr(...) is not None else 1`. However, empty batches are unlikely in practice. Low severity.  
+- `(tensor, mask)` tuple in `y_pre` — no double-detach or gradient leak risk; `.detach()` is called once. ✅
+
+**Stale comment fix.**  
+- Comment updated from "see _keep" to reference `_masks` ✅
+
+**Summary:** One potential regression in `_encode_annot` (stricter None check). One minor `num_graphs=0` edge case.
+
+**NEEDS_WORK** — `_encode_annot` should check each tensor independently and default to zeros for missing ones, not bail on any single None.

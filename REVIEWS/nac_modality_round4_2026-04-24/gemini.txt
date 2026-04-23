@@ -1,0 +1,5 @@
+Loaded cached credentials.
+- **src/model/v4_ultimate.py:479** `B = getattr(G, "num_graphs", None) or 1` falls back to 1 when `num_graphs` evaluates to 0. Impact: Causes shape mismatches and crashes during inference on valid empty (zero-sized) batches. Fix: Replace with `_n = getattr(G, "num_graphs", None); B = _n if _n is not None else 1`.
+- **src/model/v4_ultimate.py:422** `_encode_annot` completely bails and returns a zero embedding if *any* single annotation ID tensor (`_ipr`, `_pf`, or `_go`) is missing. Impact: Unnecessary loss of available predictive signal on partially annotated inputs. Fix: Evaluate `_ipr`, `_pf`, and `_go` independently, defaulting missing attributes to `torch.zeros((B, 1), dtype=torch.long, device=self.device)` (similar to the fallback logic correctly implemented in `_encode_condition`).
+
+NEEDS_WORK

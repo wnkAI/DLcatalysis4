@@ -1,0 +1,336 @@
+OpenAI Codex v0.116.0 (research preview)
+--------
+workdir: E:\AImodel\DLcatalysis4.0
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbcaa-944b-7bd0-8960-b01613708312
+--------
+user
+Verify round-3 fixes. Terse. Bugs only. End APPROVED/NEEDS_WORK/BLOCK.
+mcp startup: no servers
+codex
+Reviewing the round-3 changes against the current worktree first, then I’ll check for regressions and missing fixes.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --name-only' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git diff --stat' in E:\AImodel\DLcatalysis4.0 succeeded in 375ms:
+?? REVIEWS/nac_modality_round4_2026-04-24/
+ succeeded in 376ms:
+
+ succeeded in 386ms:
+
+codex
+The worktree is clean except for a new review folder, so I’m checking the latest commits and any round-3 review notes to map what changed.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse REVIEWS | Select-Object FullName' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "round-3|round 3|round3|NEEDS_WORK|BLOCK|APPROVED" REVIEWS -S' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git log --oneline -n 8' in E:\AImodel\DLcatalysis4.0 succeeded in 419ms:
+b651165 /five round-3 fixes: full None-guard sweep + kept-subset diagnostic
+702fedc /five round-2 fixes: split dropout mask + complete None guards + gate dims
+69d1f94 /five round-1 fixes: 10 bugs from NAC + modality dropout review
+18345ef v4-ultimate: NAC bias in int3d cross-attn + training-time modality dropout
+4f88914 v4-ultimate: diagnostics + ablation matrix + per-file audit
+3309c17 Fix 4 issues found in reviewer audit (2026-04-23)
+cb3a37f Pair-specific pocket docking pipeline (EnzymeCAGE-style 8A + K=32)
+0ea39f5 Docking: QVina2 primary (CPU) + Vina-GPU-2.1 fallback — per /five analysis
+ succeeded in 451ms:
+REVIEWS\deepseek_review_2026-04-22.txt:129:## Verdict: **NEEDS_WORK**
+REVIEWS\codex_review_2026-04-22.txt:359:**Verdict: BLOCK**
+REVIEWS\codex_review_2026-04-22.txt:381:**Verdict: BLOCK**
+REVIEWS\gemini_review_2026-04-22.txt:400:**VERDICT: NEEDS_WORK**
+REVIEWS\nac_modality_round2_2026-04-24\deepseek.txt:29:APPROVED
+REVIEWS\nac_modality_round4_2026-04-24\BRIEF.md:1:# /five round-4 brief — verify round-3 fixes
+REVIEWS\nac_modality_round4_2026-04-24\BRIEF.md:4:Commit `b651165 "round-3 fixes"` claims to fix them. Verify.
+REVIEWS\nac_modality_round4_2026-04-24\BRIEF.md:61:fix. End with `APPROVED` / `NEEDS_WORK` / `BLOCK`.
+REVIEWS\SYNTHESIS.md:7:| Codex | ✅ 完成 | BLOCK → 修 2 后进入 NEEDS_WORK |
+REVIEWS\SYNTHESIS.md:8:| DeepSeek | ✅ 完成 | NEEDS_WORK（但 3 项指控是幻觉）|
+REVIEWS\SYNTHESIS.md:9:| Gemini (2.5-pro) | ✅ 完成（多次 429 重试）| NEEDS_WORK |
+REVIEWS\nac_modality_round2_2026-04-24\gemini.txt:12:**NEEDS_WORK**
+REVIEWS\nac_modality_round2_2026-04-24\BRIEF.md:78:Verdict at the end: **APPROVED** / **NEEDS_WORK** / **BLOCK**.
+REVIEWS\nac_modality_round2_2026-04-24\codex.txt:13:Read the brief and diff. Verify round-1 fixes landed correctly AND check for new regressions. Report only bugs. End with APPROVED / NEEDS_WORK / BLOCK.
+REVIEWS\nac_modality_round2_2026-04-24\codex.txt:387:**NEEDS_WORK**
+REVIEWS\nac_modality_round2_2026-04-24\codex.txt:400:**NEEDS_WORK**
+REVIEWS\nac_modality_round3_2026-04-24\BRIEF.md:1:# /five round-3 brief — verify round-2 fixes
+REVIEWS\nac_modality_round3_2026-04-24\BRIEF.md:9:Diff: `REVIEWS/nac_modality_round3_2026-04-24/diff.patch` (185 lines,
+REVIEWS\nac_modality_round3_2026-04-24\BRIEF.md:62:End with `APPROVED` / `NEEDS_WORK` / `BLOCK`.
+REVIEWS\nac_modality_round3_2026-04-24\deepseek.txt:12:**APPROVED**
+ succeeded in 507ms:
+
+FullName                                                                     
+--------                                                                     
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23                    
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_round2_2026-04-24             
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_round3_2026-04-24             
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_round4_2026-04-24             
+E:\AImodel\DLcatalysis4.0\REVIEWS\AUDIT_PERFILE.md                           
+E:\AImodel\DLcatalysis4.0\REVIEWS\codex_review_2026-04-22.txt                
+E:\AImodel\DLcatalysis4.0\REVIEWS\deepseek_review_2026-04-22.txt             
+E:\AImodel\DLcatalysis4.0\REVIEWS\gemini_review_2026-04-22.txt               
+E:\AImodel\DLcatalysis4.0\REVIEWS\qvina_codex_2026-04-23.txt                 
+E:\AImodel\DLcatalysis4.0\REVIEWS\qvina_deepseek_2026-04-23.txt              
+E:\AImodel\DLcatalysis4.0\REVIEWS\SYNTHESIS.md                               
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23\BRIEF.md           
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23\codex.txt          
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23\deepseek.txt       
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23\diff.patch         
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23\gemini.txt         
+E:\AImodel\DLcatalysis4.0\REVIEWS\nac_modality_2026-04-23\kimi.txt           
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round4_2026-04-24\\BRIEF.md" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round3_2026-04-24\\codex.txt | Select-Object -Last 80" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show --stat --oneline --decorate b651165' in E:\AImodel\DLcatalysis4.0 succeeded in 414ms:
+b651165 (HEAD -> master) /five round-3 fixes: full None-guard sweep + kept-subset diagnostic
+ REVIEWS/nac_modality_round3_2026-04-24/BRIEF.md    |   65 +
+ REVIEWS/nac_modality_round3_2026-04-24/codex.txt   |  363 ++++++
+ .../nac_modality_round3_2026-04-24/deepseek.txt    |   12 +
+ REVIEWS/nac_modality_round3_2026-04-24/diff.patch  |  185 +++
+ REVIEWS/nac_modality_round3_2026-04-24/gemini.txt  |    7 +
+ REVIEWS/nac_modality_round3_2026-04-24/kimi.txt    | 1269 ++++++++++++++++++++
+ src/model/v4_ultimate.py                           |  121 +-
+ 7 files changed, 1976 insertions(+), 46 deletions(-)
+ succeeded in 434ms:
+# /five round-4 brief 鈥?verify round-3 fixes
+
+Round-3 review found 2 remaining issues on commit 702fedc (round-2 fixes).
+Commit `b651165 "round-3 fixes"` claims to fix them. Verify.
+
+Repo: `E:/AImodel/DLcatalysis4.0`
+Diff: `REVIEWS/nac_modality_round4_2026-04-24/diff.patch` (230 lines).
+
+## Round-3 fix list
+
+| ID | Round-3 claim |
+|----|---------------|
+| D  | Every remaining `hasattr(G, "...")` in v4_ultimate.py replaced by `getattr(G, "...", None) is not None`, so present-but-None attrs no longer crash the forward path. `grep "hasattr(G, "` should return 0 matches. |
+| E  | `y_pre` now stores `(tensor, mask01)` tuples. `_log_diag` computes kept-subset weighted mean so dropped samples' head(0)=head_bias doesn't underestimate branch magnitude. |
+
+Also: stale "see _keep" comment in the output-dropout block was updated (function had been renamed to `_masks` in round-2).
+
+## What to check
+
+1. **Fix D 鈥?zero hasattr remaining.** Run a mental grep: is there ANY
+ succeeded in 505ms:
+        go_ids = _pack(a.get("go_term_ids", set()), self.annot_vocab["go_term"])
+        return {
+            "ipr_ids": ipr_ids, "pf_ids": pf_ids, "go_ids": go_ids,
+            "has_any_annot":    torch.tensor([float(a.get("has_any_annot", False))], dtype=torch.float32),
+            "has_active_site":  torch.tensor([float(a.get("has_active_site", False))], dtype=torch.float32),
+            "has_binding_site": torch.tensor([float(a.get("has_binding_site", False))], dtype=torch.float32),
+            "has_cofactor":     torch.tensor([float(a.get("has_cofactor", False))], dtype=torch.float32),
+        }
+
+    def __getitem__(self, idx: int):
+ succeeded in 491ms:
+
+
+# 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# PyG data wrapper
+# 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+class SeqMolComplexData(torch_geometric.data.Data):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+codex
+I have the two prior findings. Now checking whether `b651165` really fixed both, and whether the new guard style introduced a regression in partial annotation batches.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(G, \\\"|def _encode_rxn|def _encode_pocket|def _encode_annot|def _encode_condition|def _encode_ec|y_pre = \\{|def _log_diag|num_graphs|ANNOT_pf_ids|ANNOT_go_ids|COND_ph|COND_temp|EC_ids\" src\\model\\v4_ultimate.py -n -C 3" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round4_2026-04-24\\diff.patch" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git show b651165:src/model/v4_ultimate.py | Select-String -Pattern \"def _encode_rxn|def _encode_pocket|def _encode_annot|def _encode_condition|def _encode_ec|def _log_diag|y_pre = \\{|num_graphs\" -Context 0,25" in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(G, \\\"|def _encode_rxn|def _encode_pocket|def _encode_annot|def _encode_condition|def _encode_ec|y_pre = \\{|def _log_diag|num_graphs|ANNOT_pf_ids|ANNOT_go_ids|COND_ph|COND_temp|EC_ids\" src\\model\\v4_ultimate.py -n -C 3"` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "git show b651165:src/model/v4_ultimate.py | Select-String -Pattern \"def _encode_rxn|def _encode_pocket|def _encode_annot|def _encode_condition|def _encode_ec|def _log_diag|y_pre = \\{|num_graphs\" -Context 0,25"` rejected: blocked by policy
+ succeeded in 397ms:
+diff --git a/src/model/v4_ultimate.py b/src/model/v4_ultimate.py
+index 9fceb77..6004df6 100644
+--- a/src/model/v4_ultimate.py
++++ b/src/model/v4_ultimate.py
+@@ -299,12 +299,17 @@ class V4Ultimate(pl.LightningModule):
+         return (feat * weights).sum(dim=1)
+ 
+     def _encode_enzyme(self, G, B):
+-        if not hasattr(G, "SEQ_seq_padding_mask"):
++        # getattr-is-not-None (not hasattr) because upstream PyG Data objects
++        # occasionally set an optional field to None; hasattr would pass and
++        # the subsequent `.shape` / `.to` would crash.
++        _pad = getattr(G, "SEQ_seq_padding_mask", None)
++        _emb = getattr(G, "SEQ_embedding", None)
++        if _pad is None or _emb is None:
+             z = torch.zeros(B, self.hidden_dim, device=self.device)
+             return None, z, None
+-        max_len = G.SEQ_seq_padding_mask.shape[1]
+-        seq_mask = (~G.SEQ_seq_padding_mask).unsqueeze(-1).float().to(self.device)
+-        x = G.SEQ_embedding.view(B, max_len, -1).to(self.device).float()
+codex
+The patch does remove the old `hasattr` sites and changes diagnostics to kept-subset means. I’m validating one remaining edge case in `_encode_annot`, because that change tightened behavior, not just guards.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content src/model/v4_ultimate.py; $c[568..705]' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(G, \\\"\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content src/model/v4_ultimate.py; $c[412..456]' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content src/model/v4_ultimate.py; $c[568..705]'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$c = Get-Content src/model/v4_ultimate.py; $c[412..456]'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(G, \\\"\" src/model/v4_ultimate.py"` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"ANNOT_ipr_ids|ANNOT_pf_ids|ANNOT_go_ids|COND_ph|COND_temp|EC_ids|num_graphs|y_pre = \\{\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n hasattr src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0 succeeded in 364ms:
+302:        # getattr-is-not-None (not hasattr) because upstream PyG Data objects
+303:        # occasionally set an optional field to None; hasattr would pass and
+338:        # (not hasattr) because upstream code may set the attribute to
+621:            # fields to None instead of omitting them — a raw hasattr passes
+707:        # is used instead of `hasattr` because upstream code sometimes
+709:        # `hasattr` would pass through and `.float()` would crash.
+ succeeded in 364ms:
+422:        _ipr = getattr(G, "ANNOT_ipr_ids", None)
+423:        _pf  = getattr(G, "ANNOT_pf_ids",  None)
+424:        _go  = getattr(G, "ANNOT_go_ids",  None)
+447:        _ph = getattr(G, "COND_ph", None)
+453:        _temp = getattr(G, "COND_temp", None)
+463:        _ec_ids = getattr(G, "EC_ids", None)
+479:        B = getattr(G, "num_graphs", None) or 1
+583:        y_pre = {
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 4 \"_ipr = getattr|_pf  = getattr|_go  = getattr|return torch.zeros\\(B, self.hidden_dim, device=self.device\\)|_ph = getattr|_temp = getattr|_ec_ids = getattr|B = getattr\\(G, \\\"num_graphs\\\", None\\) or 1\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n -C 5 \"y_pre = \\{|for name, \\(t, m01\\) in y_pre.items\\(|keep_rxn|keep_pocket|keep_annot\" src/model/v4_ultimate.py" in E:\AImodel\DLcatalysis4.0 exited 1 in 405ms:
+rg: None\): 系统找不到指定的路径。 (os error 3)
+rg: or: 系统找不到指定的文件。 (os error 2)
+rg: 1 src/model/v4_ultimate.py: 系统找不到指定的路径。 (os error 3)
+ succeeded in 430ms:
+519-                return ones, ones
+520-            mask01 = (torch.rand(B, 1, device=self.device)
+521-                      >= float(p)).float()
+522-            keep_inv = mask01 / max(1.0 - float(p), 1e-6)
+523-            return mask01, keep_inv
+524:        mask01_rxn,    keep_rxn    = _masks(md.get("rxn",    0.0))
+525:        mask01_pocket, keep_pocket = _masks(md.get("pocket", 0.0))
+526:        mask01_annot,  keep_annot  = _masks(md.get("annot",  0.0))
+527-        # Embed-level (0/1 mask, NO scaling): gates and heads see a plain
+528-        # zero for dropped samples and the original embedding otherwise.
+529-        rxn_emb     = rxn_emb     * mask01_rxn
+530-        pocket_pool = pocket_pool * mask01_pocket
+531-        annot_emb   = annot_emb   * mask01_annot
+--
+578-        # mask to compute a kept-subset mean so branch magnitudes reflect
+579-        # eval-time head outputs rather than head(0) on dropped samples.
+580-        # y_seq / y_sub have no modality dropout, so their masks are the
+581-        # all-ones identity tensor.
+582-        ones = torch.ones(B, 1, device=self.device)
+583:        y_pre = {
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n -C 4 ANNOT_ipr_ids src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n -C 3 "num_graphs|EC_ids" src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n -C 3 COND_ph src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0 succeeded in 386ms:
+418-
+419-        return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
+420-
+421-    def _encode_annot(self, G, B):
+422:        _ipr = getattr(G, "ANNOT_ipr_ids", None)
+423-        _pf  = getattr(G, "ANNOT_pf_ids",  None)
+424-        _go  = getattr(G, "ANNOT_go_ids",  None)
+425-        if not self.use_annot or _ipr is None or _pf is None or _go is None:
+426-            return torch.zeros(B, self.hidden_dim, device=self.device)
+ succeeded in 360ms:
+460-        return self.cond_proj(cond)
+461-
+462-    def _encode_ec(self, G, B):
+463:        _ec_ids = getattr(G, "EC_ids", None)
+464-        if not self.use_ec or _ec_ids is None:
+465-            return torch.zeros(B, self.hidden_dim, device=self.device)
+466-        ec = _ec_ids.to(self.device)
+--
+476-    # Forward
+477-    # ──────────────────────────────────────────────────────────────
+478-    def forward(self, G):
+479:        B = getattr(G, "num_graphs", None) or 1
+480-        _y = getattr(G, "y", None)
+481-        if _y is not None and _y.device != self.device:
+482-            G.y = _y.to(self.device)
+ succeeded in 370ms:
+444-    def _encode_condition(self, G, B):
+445-        if not self.use_condition:
+446-            return torch.zeros(B, self.hidden_dim, device=self.device)
+447:        _ph = getattr(G, "COND_ph", None)
+448-        ph = (_ph.to(self.device).float().view(B, 1)
+449-              if _ph is not None
+450-              else torch.full((B, 1), 7.0, device=self.device))
+codex
+The forward-path `hasattr` cleanup looks complete. I’m tracing annotation inputs now to see whether the new all-or-nothing guard can silently drop valid annotation signals.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round4_2026-04-24\\deepseek.txt" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "annot_vocab|go_term_ids|pfam_ids|interpro_ids|ANNOT_" -S' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "ANNOT_ipr_ids|ANNOT_pf_ids|ANNOT_go_ids|has_any_annot|pf_ids|go_ids|ipr_ids" src data -S' in E:\AImodel\DLcatalysis4.0 succeeded in 409ms:
+src\util\data_module.py:348:            "ipr_ids": torch.zeros(K, dtype=torch.long),
+src\util\data_module.py:349:            "pf_ids":  torch.zeros(K, dtype=torch.long),
+src\util\data_module.py:350:            "go_ids":  torch.zeros(K, dtype=torch.long),
+src\util\data_module.py:351:            "has_any_annot": torch.zeros(1, dtype=torch.float32),
+src\util\data_module.py:368:        ipr_ids = _pack(a.get("interpro_family_ids", set()) | {d[0] for d in a.get("interpro_domain_ranges", [])},
+src\util\data_module.py:370:        pf_ids = _pack(a.get("pfam_family_ids", set()), self.annot_vocab["pfam_family"])
+src\util\data_module.py:371:        go_ids = _pack(a.get("go_term_ids", set()), self.annot_vocab["go_term"])
+src\util\data_module.py:373:            "ipr_ids": ipr_ids, "pf_ids": pf_ids, "go_ids": go_ids,
+src\util\data_module.py:374:            "has_any_annot":    torch.tensor([float(a.get("has_any_annot", False))], dtype=torch.float32),
+src\util\data_module.py:406:            data.ANNOT_ipr_ids = annot["ipr_ids"].view(1, -1)
+src\util\data_module.py:407:            data.ANNOT_pf_ids  = annot["pf_ids"].view(1, -1)
+src\util\data_module.py:408:            data.ANNOT_go_ids  = annot["go_ids"].view(1, -1)
+src\util\data_module.py:411:            data.ANNOT_has_any     = annot["has_any_annot"].view(1, 1)
+src\model\v4_ultimate.py:422:        _ipr = getattr(G, "ANNOT_ipr_ids", None)
+src\model\v4_ultimate.py:423:        _pf  = getattr(G, "ANNOT_pf_ids",  None)
+src\model\v4_ultimate.py:424:        _go  = getattr(G, "ANNOT_go_ids",  None)
+src\model\v4_ultimate.py:428:        ipr_ids = _ipr.to(self.device).view(B, -1)  # (B, max_fam)
+src\model\v4_ultimate.py:429:        pf_ids  = _pf.to(self.device).view(B, -1)
+src\model\v4_ultimate.py:430:        go_ids  = _go.to(self.device).view(B, -1)
+src\model\v4_ultimate.py:438:        ipr_pool = _bag_pool(ipr_ids, self.ipr_emb)
+ succeeded in 416ms:
+**Fix D 鈥?zero hasattr remaining.**  
+- `_encode_enzyme`: `hasattr` replaced with `getattr(..., None)` 鉁? 
+- `_encode_substrate`: `hasattr` replaced 鉁? 
+- `_encode_rxn`: `hasattr` replaced 鉁? 
+- `_encode_pocket`: `hasattr` replaced 鉁? 
+- `_encode_annot`: `hasattr` replaced 鉁? 
+- `_encode_condition`: both `hasattr` calls replaced 鉁? 
+- `_encode_ec`: `hasattr` replaced 鉁? 
+- `forward`: `hasattr(G, "num_graphs")` and `hasattr(G, "y")` replaced 鉁? 
+- `training_step`: both `hasattr` calls replaced 鉁? 
+- **No remaining `hasattr(G, ...)` in file.** 鉁?
+
+**Fix E 鈥?kept-subset mean.**  
+- `y_pre` now stores `(tensor, mask01)` tuples 鉁? 
+- `_log_diag` computes `(t.abs() * w).sum() / w.sum().clamp(1)` 鈥?correct kept-subset mean 鉁? 
+- Edge case `w.sum()=0` 鈫?denominator clamped to 1 鈫?result 0, acceptable 鉁?
+
+**Regressions.**  
+- `_encode_annot` bails if *any* of `ANNOT_ipr_ids`, `ANNOT_pf_ids`, `ANNOT_go_ids` is None. This is stricter than before (which only checked `ANNOT_ipr_ids`). If `pf_ids` or `go_ids` are legitimately absent while `ipr_ids` is present, this silently zeros the annotation branch. **Potential regression** 鈥?should check each independently with default zeros.  
+- `B = getattr(G, "num_graphs", None) or 1` 鈥?if `num_graphs=0` (empty batch), falls back to 1. This is incorrect; should be `getattr(...) if getattr(...) is not None else 1`. However, empty batches are unlikely in practice. Low severity.  
+ succeeded in 579ms:
+config\v4_ultimate.yml:91:  annot_vocab:
+config\v4_pocket.yml:40:  annot_vocab:
+config\ablation\v4_ultimate_A0_seq.yml:66:  annot_vocab:
+REVIEWS\AUDIT_PERFILE.md:138:- **Purpose.** PyG data representer; attaches all modality tensors under namespaced keys (`SEQ_*`, `MOL_*`, `POCKET_*`, `RXN_*`, `ANNOT_*`, `COND_*`, `EC_*`, `Y_*`).
+config\ablation\v4_ultimate_A2_rxn_center.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A1_sub.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A3_drfp.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A4_pocket.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A5_int3d.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A6_annot.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A7_condition.yml:66:  annot_vocab:
+config\ablation\v4_ultimate_A8_full.yml:66:  annot_vocab:
+REVIEWS\nac_modality_round3_2026-04-24\BRIEF.md:17:| B  | L1 incomplete — `hasattr` still used in forward path for `MOL_rxn_center`, `MOL_graph_xyz`, `MOL_graph_xyz_valid`, `ANNOT_has_any`, `ANNOT_has_cof` | Replaced with `getattr(..., None) is not None` at all 4 call sites |
+src\util\data_module.py:99:        if key.startswith("RXN_") or key.startswith("ANNOT_") or key.startswith("COND_"):
+src\util\data_module.py:208:        self.annot_vocab = None
+src\util\data_module.py:209:        self.max_fam_per_enzyme = config["model"].get("annot_vocab", {}).get("max_fam_per_enzyme", 16)
+src\util\data_module.py:218:                self.annot_vocab = {
+src\util\data_module.py:224:                      f"(vocab: ipr={len(self.annot_vocab['interpro_family'])}, "
+src\util\data_module.py:225:                      f"pf={len(self.annot_vocab['pfam_family'])}, "
+src\util\data_module.py:226:                      f"go={len(self.annot_vocab['go_term'])})")
+codex
+- `src/model/v4_ultimate.py:422-425` `_encode_annot` now zeros the entire annotation branch when any one of `ANNOT_ipr_ids` / `ANNOT_pf_ids` / `ANNOT_go_ids` is `None`; impact: partially populated annotation inputs silently lose valid remaining signals instead of degrading per-field; fix: guard each tensor independently and substitute zero-id tensors for missing fields before pooling.
+
+NEEDS_WORK
+tokens used
+69,732
+- `src/model/v4_ultimate.py:422-425` `_encode_annot` now zeros the entire annotation branch when any one of `ANNOT_ipr_ids` / `ANNOT_pf_ids` / `ANNOT_go_ids` is `None`; impact: partially populated annotation inputs silently lose valid remaining signals instead of degrading per-field; fix: guard each tensor independently and substitute zero-id tensors for missing fields before pooling.
+
+NEEDS_WORK

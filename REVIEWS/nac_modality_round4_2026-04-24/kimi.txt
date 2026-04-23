@@ -1,0 +1,473 @@
+--- Logging error in Loguru Handler #1 ---
+Record was: {'elapsed': datetime.timedelta(seconds=3, microseconds=96815), 'exception': None, 'extra': {'session_id': '6cb88f36-1873-48a1-be36-fbcc20ad36f7'}, 'file': (name='__init__.py', path='C:\\Users\\wnkfr\\AppData\\Roaming\\uv\\tools\\kimi-cli\\Lib\\site-packages\\kimi_cli\\cli\\__init__.py'), 'function': '_run', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 524, 'message': 'Created new session: 6cb88f36-1873-48a1-be36-fbcc20ad36f7', 'module': '__init__', 'name': 'kimi_cli.cli', 'process': (id=95044, name='MainProcess'), 'thread': (id=108400, name='MainThread'), 'time': datetime(2026, 4, 24, 0, 26, 51, 595252, tzinfo=datetime.timezone(datetime.timedelta(seconds=3600), 'GMT 夏令时'))}
+Traceback (most recent call last):
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_handler.py", line 206, in emit
+    self._sink.write(str_record)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_file_sink.py", line 204, in write
+    self._terminate_file(is_rotating=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_file_sink.py", line 276, in _terminate_file
+    os.rename(old_path, renamed_path)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Users\\wnkfr\\.kimi\\logs\\kimi.log' -> 'C:\\Users\\wnkfr\\.kimi\\logs\\kimi.2026-04-18_07-28-43_901007.log'
+--- End of logging error ---
+• The user wants me to:
+
+  1. Read three files:
+    • REVIEWS/nac_modality_round4_2026-04-24/BRIEF.md
+    • REVIEWS/nac_modality_round4_2026-04-24/diff.patch
+    • src/model/v4_ultimate.py
+  2. Verify round-3 fixes (zero hasattr left, kept-subset diagnostics)
+  3. Focus on remaining hasattr sites and any regression from the None guard sw
+  4. Be terse
+  5. End with APPROVED/NEEDS_WORK/BLOCK
+
+  Let me read all three files in parallel.
+• Used ReadFile (REVIEWS/nac_modality_round4_2026-04-24/BRIEF.md)
+• Used ReadFile (REVIEWS/nac_modality_round4_2026-04-24/diff.patch)
+• Used ReadFile (src/model/v4_ultimate.py)
+• Let me analyze the three files carefully.
+
+  Fix D: Zero hasattr remaining I need to check v4_ultimate.py for any remainin
+  g hasattr(G, patterns.
+
+  Looking through the file:
+
+  • Line 305: _pad = getattr(G, "SEQ_seq_padding_mask", None) — OK
+  • Line 306: _emb = getattr(G, "SEQ_embedding", None) — OK
+  • Line 320: _x = getattr(G, "MOL_graph_x", None) — OK
+  • Line 341: _rxn_center = getattr(G, "MOL_rxn_center", None) — OK
+  • Line 365: _drfp = getattr(G, "RXN_drfp", None) — OK
+  • Line 379: _node_s = getattr(G, "POCKET_node_s", None) — OK
+  • Line 422-424: _ipr, _pf, _go — OK
+  • Line 447: _ph = getattr(G, "COND_ph", None) — OK
+  • Line 453: _temp = getattr(G, "COND_temp", None) — OK
+  • Line 463: _ec_ids = getattr(G, "EC_ids", None) — OK
+  • Line 479: B = getattr(G, "num_graphs", None) or 1 — OK
+  • Line 480: _y = getattr(G, "y", None) — OK
+  • Line 553-554: _mol_xyz, _mol_xyz_valid — OK
+  • Line 623-624: _annot_any, _annot_cof — OK
+  • Line 717: rxn_valid = getattr(G, "RXN_drfp_valid", None) — OK
+  • Line 721: drfp = getattr(G, "RXN_drfp", None) — OK
+  • Line 726: annot_any = getattr(G, "ANNOT_has_any", None) — OK
+  • Line 729: annot_cof = getattr(G, "ANNOT_has_cof", None) — OK
+  • Line 732: mol_xyz_valid = getattr(G, "MOL_graph_xyz_valid", None) — OK
+  • Line 823: seq_ids = getattr(G, "SEQ_seq_id", None) — OK
+  • Line 833: smi_ids = getattr(G, "MOL_smi_id", None) — OK
+
+  No hasattr(G, found. Fix D is clean.
+
+  Wait, let me search more carefully. I don't see any hasattr in the file. Let
+  me verify by doing a grep.
+
+  Actually I need to also check if there are hasattr with something other than
+  G. Let me scan...
+
+  • has_valid = (mask > 0.5).any(dim=1, keepdim=True) — this is tensor method,
+    t Python hasattr
+  • No other hasattr patterns visible.
+
+  Fix E: kept-subset mean Looking at lines 694-697:
+
+  for name, (t, m01) in y_pre.items():
+      w = m01.float()
+      denom = w.sum().clamp(min=1.0)
+      _log(f"{name}_abs", (t.abs() * w).sum() / denom)
+
+  This matches the expected pattern. For y_seq/y_sub, mask is ones (all ones),
+  so it's a plain mean. For others, it's weighted by mask01. If entire batch dr
+  opped, denom=1, result=0. Correct.
+
+  Regressions to check:
+
+  1. Encoder-entry early returns (_encode_condition, _encode_annot):
+    • _encode_annot: Checks _ipr is None or _pf is None or _go is None. If ANY
+      one, returns zeros. The brief asks: "Is this the right semantics, or shou
+      ach tensor be checked independently with default zeros?"
+    • Looking at the original code (before patch), it only checked hasattr(G, "
+      T_ipr_ids"). The patch now checks all three. If upstream supplies ipr but
+      pf/go, it bails entirely. This is a semantic change — previously it would
+      e crashed on missing pf/go (since it accessed them unconditionally after
+      hasattr check on ipr alone), so the patch actually makes it safer by earl
+      turning. But the brief is asking if this is overly strict.
+    • Actually wait: the original code had if not self.use_annot or not hasattr
+      "ANNOT_ipr_ids") and then accessed G.ANNOT_ipr_ids, G.ANNOT_pf_ids, G.ANN
+      o_ids unconditionally. So if ipr was present but pf was missing, it would
+      sh. The new check _ipr is None or _pf is None or _go is None early-return
+      ros, which is safer than crashing but might be overly conservative if the
+      el could work with partial annotation data.
+    • However, the annot_proj concatenates all three pools: torch.cat([ipr_pool
+      _pool, go_pool], dim=-1) and projects to hidden_dim. If any is missing, w
+      n't easily substitute because the embedding dimensions are fixed. We coul
+      ro-pool, but the current code returns zero embedding. The brief says "sho
+      each tensor be checked independently with default zeros" — that would req
+      creating zero pools for missing ones. The current approach is safe but co
+      vative. Is it a regression? No, it's a semantic decision. It doesn't cras
+      nd the old code would have crashed anyway. Not a regression.
+  2. B = getattr(G, "num_graphs", None) or 1:
+    • The brief notes: "the or trick means num_graphs=0 would fall back to 1."
+    • Is num_graphs=0 possible? In PyG, num_graphs on a Batch is the batch size
+      batch size is 0, you have an empty batch, and the model shouldn't be call
+      But if someone passes a single Data object (not Batch), it doesn't have n
+      raphs, so getattr returns None, and or 1 gives 1. That's correct.
+    • Could num_graphs=0 happen? An empty Batch could theoretically have num_gr
+      =0. In that case, B=1 would be wrong and could cause shape mismatches. Ho
+      r, PyG Batch with no graphs is degenerate; forward would likely fail earl
+      The old code was G.num_graphs if hasattr(G, "num_graphs") else 1, which a
+      would have given num_graphs=0 if it existed and was 0. So the or 1 only c
+      es behavior when num_graphs is 0 vs None. The old code: hasattr → True →
+      m_graphs = 0. New code: getattr(..., None) or 1 → 0 or 1 → 1. So yes, if
+      graphs=0, old code gave 0, new gives 1.
+    • Is num_graphs=0 reachable? Unlikely in practice, but technically a differ
+      . The brief explicitly asks about this. I should flag it as a minor issue
+
+  Wait, actually hasattr only checks existence. If num_graphs is an attribute w
+  ith value 0, hasattr returns True, and old code returns 0. New code returns 1
+  . This is a semantic difference. Should we care? In PyG, a Batch object alway
+  s has num_graphs >= 1 if it has any data. An empty batch is rare. But it's wo
+  rth noting.
+
+  3. New (tensor, mask) tuple in y_pre:
+    • Any risk of double-detach, gradient leak, memory explosion?
+    • y_seq.detach() creates a detached tensor. The tuple stores (detached_tens
+      mask). The mask may be a leaf or intermediate tensor. In the logging code
+      ly t.abs() is used, and w is used. No gradients flow back because t is de
+      ed. m01 (mask) might still have grad if it came from a sampling operation
+      , mask01 is created by (torch.rand(...) >= p).float() — no gradients. kee
+      v has gradients? No, it's derived from mask01. So no gradient leak.
+    • Memory: storing 6 extra tensors per forward pass for diagnostics. Previou
+      it was 6 tensors, now it's 12 (6 values + 6 masks). But the masks are sma
+      B,1). Negligible. No memory explosion.
+
+  Remaining hasattr sites: I need to verify there are truly zero. Let me scan t
+  he file one more time for any hasattr.
+
+  • Line 669: if getattr(self, "_trainer", None) is not None: — this is getattr
+    elf,...) not hasattr(G,...). Fine.
+  • No other hasattr visible.
+
+  Wait, I should also check if there are hasattr calls in the file at all. Scan
+  ning through:
+
+  • I don't see any hasattr in the entire file. All have been replaced with get
+    tr(..., None).
+
+  Actually, let me look at _encode_substrate more carefully. Line 320-321:
+
+  _x = getattr(G, "MOL_graph_x", None)
+  if not self.use_substrate or _x is None:
+
+  Old code: if (not self.use_substrate or not hasattr(G, "MOL_graph_x") or G.MO
+  L_graph_x is None): Wait, the old code checked both hasattr AND G.MOL_graph_x
+  is None. The new code checks getattr(..., None) is None. This covers both cas
+  es (missing attr or None value). Correct.
+
+  Other potential issues:
+
+  In _encode_pocket, line 379-383:
+
+  _node_s = getattr(G, "POCKET_node_s", None)
+  if not self.use_pocket or _node_s is None:
+      return (None, ..., None, None, None)
+
+  Then line 393-397 accesses G.POCKET_node_v, G.POCKET_edge_index, etc. without
+  guards. But this is after the early return, so if _node_s exists, we assume t
+  he rest exist. This is the same pattern as before (old code checked hasattr(G
+  , "POCKET_node_s") and then accessed the rest). So no regression.
+
+  In _encode_substrate, after the early return on _x is None, it accesses G.MOL
+  _graph_num_nodes, G.MOL_graph_edge_index, G.MOL_graph_edge_attr without guard
+  s. Same as before — if _x exists, the rest are assumed to exist. No regressio
+  n.
+
+  In _encode_enzyme, after early return, it accesses _pad.shape[1], _emb.view(.
+  ..). Guarded by _pad is None or _emb is None. Same as before.
+
+  Smoke test for pocket branch: The brief describes a smoke test. Let me verify
+  :
+
+  • mask01_pocket=1 for kept sample, keep_pocket=1/(1-0.15)≈1.176
+  • pocket_pool unchanged by mask01_pocket=1 (multiplying by 1)
+  • pocket_tokens unchanged by mask01_pocket.unsqueeze(-1)=1
+  • y_struct = head_struct(pocket_pool) = y_struct_eval
+  • After output scaling: y_struct * 1.176
+  • In residual: g_struct * y_struct * 1.176
+  • At eval: mask01=1, keep=1, y_struct * 1 = y_struct_eval
+  • Expected contribution during training = (1-p) * y_struct_eval * (1/(1-p)) +
+  * 0 = y_struct_eval
+
+  Wait, the residual composition is:
+
+  pred = y_seq + g_pair * pair_delta + g_struct * y_struct + g_annot * y_annot
+
+  At training, y_struct is scaled by keep_pocket. So g_struct * y_struct * keep
+  _pocket. Expected value over dropout: E[g_struct * y_struct * keep_pocket] =
+  g_struct * y_struct_eval * (1-p) * (1/(1-p)) + 0 * p = g_struct * y_struct_ev
+  al. Correct.
+
+  One subtlety: y_int3d uses keep_pocket (same as struct), but y_int3d is compu
+  ted from pocket_tokens which are masked at the input level by mask01_pocket.
+  For a dropped sample, pocket_tokens = 0, so int3d(...) gets zero pocket token
+  s, producing some output (likely near zero because pocket contribution is zer
+  oed), then multiplied by keep_pocket=0. So dropped samples contribute 0. For
+  kept samples, pocket_tokens are unscaled (mask=1), so int3d runs normally, th
+  en output is scaled by keep≈1.176. E[keep*y_int3d] = y_int3d_eval. Correct.
+
+  Is there any issue with _encode_condition? The brief mentions: "which now bai
+  l if any of the required tensors is None (e.g., ANNOT_ipr_ids present but pf_
+  ids None). Is this the right semantics, or should each tensor be checked inde
+  pendently with default zeros?" For _encode_condition, the patch checks _ph an
+  d _temp independently. It does NOT bail if any is None — it substitutes defau
+  lts. So this is fine.
+
+  For _encode_annot, it does bail if any of the three is None. As discussed, th
+  e old code would crash if pf_ids or go_ids were missing (since it only checke
+  d ipr). So this is an improvement. But is it the right semantics? The annot_p
+  roj takes 3*embed_dim input. If we wanted to handle partial annotations, we'd
+  need to create zero pools for missing ones. But the current code doesn't do t
+  hat. Is this a regression? No, because the old code crashed in this scenario.
+  But the brief is asking if this is right. I think it's acceptable — partial a
+  nnotation support would be a feature, not a bug fix.
+
+  One more check: _encode_enzyme Old code: if not hasattr(G, "SEQ_seq_padding_m
+  ask") New code: if _pad is None or _emb is None Wait, old code only checked S
+  EQ_seq_padding_mask, then accessed both SEQ_seq_padding_mask and SEQ_embeddin
+  g. If SEQ_embedding was missing but padding_mask existed, old code would cras
+  h. New code catches this. Improvement.
+
+  B = getattr(G, "num_graphs", None) or 1 I should flag this as a minor concern
+  . If num_graphs=0, old code returned 0, new returns 1. But num_graphs=0 is ex
+  tremely rare for PyG Batch. However, it's a semantic change. I'll note it as
+  low severity.
+
+  Double-check for any remaining hasattr in the file I scanned manually and fou
+  nd none. But let me do a quick grep to be absolutely sure.
+• Used Grep (hasattr\()
+• No matches for hasattr( in v4_ultimate.py. Fix D is confirmed clean.
+
+  Let me double-check the B = getattr(G, "num_graphs", None) or 1 issue. In PyG
+  , a Batch object has num_graphs property. A single Data object doesn't. So:
+
+  • Single Data: getattr returns None → or 1 → 1. Correct.
+  • Batch with 5 graphs: getattr returns 5 → or 1 → 5. Correct.
+  • Empty Batch with num_graphs=0: getattr returns 0 → or 1 → 1. Different from
+    ld code.
+
+  But wait — can PyG even create a Batch with num_graphs=0? If you do Batch.fro
+  m_data_list([]), I believe it crashes or returns something weird. Let me thin
+  k... Actually, PyG's Batch requires at least one graph typically. Even if it
+  didn't, the downstream code would break with B=0 because torch.zeros(0, hidde
+  n_dim) would be passed around. So in practice, num_graphs=0 is not a realisti
+  c case. But I should still mention it as a theoretical divergence.
+
+  However, the brief says "Is this the right semantics, or should it be getattr
+  (...) if getattr(...) is not None else 1?" So they're pointing out the or tri
+  ck. I should flag this.
+
+  Wait, actually I should look more carefully. Is there any place where num_gra
+  phs could legitimately be 0? In PyG, Data objects don't have num_graphs. Batc
+  h objects do. If someone does Batch.from_data_list([]), I think PyG 2.x retur
+  ns a Batch with batch attribute empty and num_graphs=0. But then calling .to(
+  self.device) etc. would still work, but forward would get B=1 and try to acce
+  ss G.y which might not exist or be empty. This is all very edge-casey.
+
+  Actually, I realize the old code: G.num_graphs if hasattr(G, "num_graphs") el
+  se 1. For a Data object (single graph), hasattr(G, "num_graphs") returns Fals
+  e, so B=1. For a Batch with 5 graphs, B=5. For a Batch with 0 graphs, B=0. Ne
+  w code: Data→B=1, Batch(5)→B=5, Batch(0)→B=1. The change is only for Batch(0)
+  .
+
+  I'll flag this as low severity.
+
+  Let me also check if there are any other subtle issues.
+
+  In _encode_pocket, after early return, it accesses:
+
+  node_v = G.POCKET_node_v.to(self.device).float()
+  edge_index = G.POCKET_edge_index.to(self.device).long()
+  edge_s = G.POCKET_edge_s.to(self.device).float()
+  edge_v = G.POCKET_edge_v.to(self.device).float()
+  num_nodes = G.POCKET_num_nodes.to(self.device).view(-1)
+  ...
+  ca_xyz = G.POCKET_ca_xyz.to(self.device).float()
+
+  These are unguarded. But old code did the same — after hasattr(G, "POCKET_nod
+  e_s"), it accessed all of these. So no regression.
+
+  Wait, looking at _encode_substrate:
+
+  num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
+  graph_batch = torch.repeat_interleave(...)
+  atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
+      x=_x.to(self.device),
+      edge_index=G.MOL_graph_edge_index.to(self.device),
+      edge_attr=G.MOL_graph_edge_attr.to(self.device),
+      batch=graph_batch,
+  )
+
+  If _x is not None but G.MOL_graph_edge_index is None, this crashes. Old code
+  would also crash because it only checked hasattr(G, "MOL_graph_x") and G.MOL_
+  graph_x is not None. No regression.
+
+  In _encode_enzyme, _pad and _emb are both checked. If one exists but the othe
+  r doesn't, old code would crash (only checked padding_mask). New code early-r
+  eturns. Improvement.
+
+  What about _encode_ec? Old code: if not (self.use_ec and hasattr(G, "EC_ids")
+  ). New code: if not self.use_ec or _ec_ids is None. Same semantics for the co
+  mmon case. If EC_ids exists but is None, old code: hasattr True → G.EC_ids is
+  None → .to() would crash. New code catches it. Improvement.
+
+  What about _encode_rxn? Old code: if not self.use_rxn_drfp or not hasattr(G,
+  "RXN_drfp"). New code: if not self.use_rxn_drfp or _drfp is None. If RXN_drfp
+  exists but is None, old code: hasattr True → G.RXN_drfp is None → .to() crash
+  es. New code catches it. Improvement.
+
+  Now, looking at forward:
+
+  B = getattr(G, "num_graphs", None) or 1
+  _y = getattr(G, "y", None)
+  if _y is not None and _y.device != self.device:
+      G.y = _y.to(self.device)
+
+  Wait, _y = getattr(G, "y", None). Then if _y is not None.... But at the end:
+  return pred, G.y. If G.y doesn't exist (i.e., _y is None), then G.y would rai
+  se AttributeError on return! But this is not new — old code had if hasattr(G,
+  "y") and G.y.device != self.device: which assumed G.y exists for the return.
+  So if G.y is missing, both old and new code would crash at return pred, G.y.
+  No regression.
+
+  Wait, but _y = getattr(G, "y", None) doesn't create G.y if it doesn't exist.
+  Then return pred, G.y will crash. Old code had the same issue. Not a regressi
+  on.
+
+  One more thing: in _log_diag, y_pre values are detached. The logging happens
+  inside if getattr(self, "_trainer", None) is not None. This is fine.
+
+  Summary of issues:
+
+  1. B = getattr(G, "num_graphs", None) or 1 — if num_graphs=0, returns 1 inste
+     of 0. Low severity, edge case.
+  2. No remaining hasattr sites.
+  3. Fix E (kept-subset mean) implemented correctly.
+  4. No gradient leak from y_pre tuple.
+  5. _encode_annot all-or-nothing semantics — conservative but safe, not a regr
+     ion since old code crashed on partial annotations.
+
+  Are there any other issues? Let me scan the diff.patch again for anything sus
+  picious.
+
+  Line 38: num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1) — not cha
+  nged. Line 40-46: edge_index, edge_attr still accessed from G directly. Fine.
+
+  Line 132-133: B = getattr(G, "num_graphs", None) or 1 — noted.
+
+  Line 135-137:
+
+  _y = getattr(G, "y", None)
+  if _y is not None and _y.device != self.device:
+      G.y = _y.to(self.device)
+
+  This is fine. If _y is None, nothing happens.
+
+  Line 600-602:
+
+  y_rxn    = y_rxn    * keep_rxn
+  y_struct = y_struct * keep_pocket
+  y_int3d  = y_int3d  * keep_pocket
+  y_annot  = y_annot  * keep_annot
+
+  Wait, y_int3d uses keep_pocket, but mask01_pocket was used for pocket_tokens
+  and pocket_pool. Is that correct? Yes, because int3d is derived from pocket_t
+  okens, which are masked by pocket dropout. So int3d shares the pocket dropout
+  mask. Correct.
+
+  Wait, y_struct also uses keep_pocket. Both struct and int3d use the same pock
+  et dropout. This is correct per the design.
+
+  One thing: in _log_diag, for y_int3d, the mask is mask01_pocket. For y_struct
+  , also mask01_pocket. This makes sense because they share the same dropout. T
+  he kept-subset mean for both will be over the same subset. Correct.
+
+  What about y_rxn? Mask is mask01_rxn. Correct. y_annot? Mask is mask01_annot.
+  Correct. y_seq, y_sub? Mask is ones. Correct.
+
+  Everything looks good.
+
+  Let me reconsider the num_graphs issue. The brief specifically asks about it.
+  I should mention it. But is it actually a problem? In practice, no. But the b
+  rief frames it as a potential regression. I'll note it as a very low severity
+  observation.
+
+  Actually, thinking more carefully: getattr(G, "num_graphs", None) or 1 — if n
+  um_graphs is 0, we get 1. But if num_graphs is 0, the batch is empty. With B=
+  1, the code will try to create tensors of size (1, hidden_dim) and then try t
+  o index into G attributes that are likely empty or have 0 in their first dime
+  nsion. It will crash either way. So the or 1 doesn't make things worse; it ju
+  st fails differently. Not worth blocking.
+
+  Is there anything else? Let me look at _encode_condition again.
+
+  _ph = getattr(G, "COND_ph", None)
+  ph = (_ph.to(self.device).float().view(B, 1)
+        if _ph is not None
+        else torch.full((B, 1), 7.0, device=self.device))
+
+  This is correct. _ph could be a tensor or None.
+
+  Same for _temp.
+
+  Wait, what if _ph exists but contains NaNs? The code handles NaNs separately:
+
+  ph_missing = (torch.isnan(ph)).float()
+  ph = torch.where(torch.isnan(ph), torch.full_like(ph, 7.0), ph) / 14.0
+
+  This is unchanged and correct.
+
+  One more check: the _encode_annot change. The old code:
+
+  if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+      return torch.zeros(...)
+  ipr_ids = G.ANNOT_ipr_ids...
+  pf_ids = G.ANNOT_pf_ids...
+  go_ids = G.ANNOT_go_ids...
+
+  If ANNOT_ipr_ids existed but pf_ids didn't, old code would crash on G.ANNOT_p
+  f_ids. New code:
+
+  if not self.use_annot or _ipr is None or _pf is None or _go is None:
+      return torch.zeros(...)
+
+  This returns zeros if any is missing. This is safer. The brief asks if this i
+  s the right semantics. It is acceptable because the annot_proj expects all th
+  ree. Supporting partial annotations would require code changes, not just guar
+  d changes. So this is fine.
+
+  Conclusion:
+
+  • Zero hasattr remaining: CONFIRMED.
+  • Kept-subset diagnostics: CONFIRMED correct.
+  • Regressions: Only the num_graphs=0 edge case is technically a semantic chan
+    , but practically harmless.
+
+  I'll report this as APPROVED with one minor note about the or 1 pattern.
+
+  Wait, should I check if there are any hasattr calls on things OTHER than G? T
+  he grep I ran searched for hasattr( and found nothing. So zero hasattr total.
+  Good.
+
+  Let me write the terse report.
+• Zero hasattr in v4_ultimate.py — fix D clean.
+  Kept-subset mean uses (t.abs() * w).sum() / w.sum().clamp(1) — fix E correct;
+  all-ones for seq/sub, mask01 for rxn/struct/int3d/annot, div-by-zero guarded.
+  Regressions:
+  • src/model/v4_ultimate.py:479 — B = getattr(G, "num_graphs", None) or 1 fold
+    num_graphs=0 → 1. Empty PyG batches are degenerate anyway, but old code pre
+    rved 0. Low; consider B = getattr(G, "num_graphs", 1) if you want 0 preserv
+    .
+  No double-detach or gradient leak in y_pre tuples; masks are no_grad Bernoull
+  i samples. _encode_annot all-or-nothing early-return is conservative but safe
+  (old code crashed on partial annotations).
+
+  APPROVED

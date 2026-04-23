@@ -419,25 +419,30 @@ class V4Ultimate(pl.LightningModule):
         return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
 
     def _encode_annot(self, G, B):
+        if not self.use_annot:
+            return torch.zeros(B, self.hidden_dim, device=self.device)
         _ipr = getattr(G, "ANNOT_ipr_ids", None)
         _pf  = getattr(G, "ANNOT_pf_ids",  None)
         _go  = getattr(G, "ANNOT_go_ids",  None)
-        if not self.use_annot or _ipr is None or _pf is None or _go is None:
+        # If every annotation field is missing, the whole branch is dark.
+        if _ipr is None and _pf is None and _go is None:
             return torch.zeros(B, self.hidden_dim, device=self.device)
-        # IDs already padded to fixed max length with padding_idx=0 upstream
-        ipr_ids = _ipr.to(self.device).view(B, -1)  # (B, max_fam)
-        pf_ids  = _pf.to(self.device).view(B, -1)
-        go_ids  = _go.to(self.device).view(B, -1)
-        # Mean pool over non-zero entries
-        def _bag_pool(ids, emb_layer):
-            e = emb_layer(ids)                     # (B, L, D)
-            m = (ids > 0).float().unsqueeze(-1)    # (B, L, 1)
+        # Per-family degrade: if one of {interpro, pfam, GO} is missing while
+        # the others are present, use a zero pool for the missing field only
+        # instead of zeroing the entire annotation branch.
+        embed_dim = self.ipr_emb.embedding_dim
+        def _bag_pool(ids_tensor, emb_layer):
+            if ids_tensor is None:
+                return torch.zeros(B, embed_dim, device=self.device)
+            ids = ids_tensor.to(self.device).view(B, -1)  # (B, max_fam)
+            e = emb_layer(ids)                            # (B, L, D)
+            m = (ids > 0).float().unsqueeze(-1)           # (B, L, 1)
             s = (e * m).sum(dim=1)
             n = m.sum(dim=1).clamp(min=1.0)
             return s / n
-        ipr_pool = _bag_pool(ipr_ids, self.ipr_emb)
-        pf_pool  = _bag_pool(pf_ids,  self.pf_emb)
-        go_pool  = _bag_pool(go_ids,  self.go_emb)
+        ipr_pool = _bag_pool(_ipr, self.ipr_emb)
+        pf_pool  = _bag_pool(_pf,  self.pf_emb)
+        go_pool  = _bag_pool(_go,  self.go_emb)
         cat = torch.cat([ipr_pool, pf_pool, go_pool], dim=-1)
         return self.annot_proj(cat)
 
@@ -476,7 +481,11 @@ class V4Ultimate(pl.LightningModule):
     # Forward
     # ──────────────────────────────────────────────────────────────
     def forward(self, G):
-        B = getattr(G, "num_graphs", None) or 1
+        # Using `getattr(..., 1)` directly (not `... or 1`) so an explicit
+        # num_graphs=0 is preserved rather than silently coerced to 1. An
+        # empty batch is degenerate downstream either way, but preserving
+        # the input value makes the failure mode easier to diagnose.
+        B = getattr(G, "num_graphs", 1)
         _y = getattr(G, "y", None)
         if _y is not None and _y.device != self.device:
             G.y = _y.to(self.device)

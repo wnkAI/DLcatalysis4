@@ -298,7 +298,7 @@ class V4Ultimate(pl.LightningModule):
     def _encode_substrate(self, G, B):
         if not hasattr(G, "MOL_graph_x") or G.MOL_graph_x is None:
             z = torch.zeros(B, self.hidden_dim, device=self.device)
-            return None, z, None
+            return None, z, None, None
         num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
         graph_batch = torch.repeat_interleave(
             torch.arange(num_nodes.size(0), device=self.device), num_nodes
@@ -309,11 +309,19 @@ class V4Ultimate(pl.LightningModule):
             edge_attr=G.MOL_graph_edge_attr.to(self.device),
             batch=graph_batch,
         )
-        # Add RXNMapper center flag to atom tokens (if available)
+        # Reaction-center dense flag, kept around for the NAC bias in int3d
+        # even when `use_rxn_center` (the atom-token injection) is disabled.
+        rxn_center_dense = None
+        if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
+            from torch_geometric.utils import to_dense_batch
+            center_flag_long = G.MOL_rxn_center.to(self.device).long()
+            rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
+                                                 graph_batch)            # (B, A)
+        # Add RXNMapper center flag to atom tokens (if enabled)
         if self.use_rxn_center and hasattr(G, "MOL_rxn_center"):
             from torch_geometric.utils import to_dense_batch
             center_flag = G.MOL_rxn_center.to(self.device).long()
-            center_dense, _ = to_dense_batch(center_flag, graph_batch)  # (B, A)
+            center_dense, _ = to_dense_batch(center_flag, graph_batch)   # (B, A)
             center_emb = self.rxn_center_emb(center_dense)               # (B, A, D)
             m = atom_mask.unsqueeze(-1).float()                          # (B, A, 1)
             # Atom-level: add only where atom is valid
@@ -323,7 +331,7 @@ class V4Ultimate(pl.LightningModule):
             masked_sum = (center_emb * m).sum(dim=1)                     # (B, D)
             n_atoms = m.sum(dim=1).clamp(min=1.0)                        # (B, 1)
             graph_emb = graph_emb + masked_sum / n_atoms
-        return atom_tokens, graph_emb, atom_mask
+        return atom_tokens, graph_emb, atom_mask, rxn_center_dense
 
     def _encode_rxn(self, G, B):
         if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
@@ -331,9 +339,18 @@ class V4Ultimate(pl.LightningModule):
         drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
         return self.rxn_proj(drfp)
 
+    # Catalytic-residue prior used as a soft NAC bias in int3d.
+    # Indices correspond to STANDARD_AA order in scripts/14_extract_pockets.py:
+    # 1 ARG, 3 ASP, 4 CYS, 6 GLU, 8 HIS, 11 LYS, 15 SER, 18 TYR. These eight
+    # residues account for the vast majority of catalytic activity in MCSA
+    # (acid/base, nucleophile, metal-coordinating side chains).
+    _CATALYTIC_AA_IDX = (1, 3, 4, 6, 8, 11, 15, 18)
+
     def _encode_pocket(self, G, B):
         if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
-            return None, torch.zeros(B, self.hidden_dim, device=self.device), None, None
+            return (None,
+                    torch.zeros(B, self.hidden_dim, device=self.device),
+                    None, None, None)
         node_s = G.POCKET_node_s.to(self.device).float()
         node_v = G.POCKET_node_v.to(self.device).float()
         edge_index = G.POCKET_edge_index.to(self.device).long()
@@ -349,7 +366,19 @@ class V4Ultimate(pl.LightningModule):
         ca_xyz = G.POCKET_ca_xyz.to(self.device).float()
         from torch_geometric.utils import to_dense_batch
         pocket_xyz, _ = to_dense_batch(ca_xyz, batch)
-        return p_tokens, p_pool, p_mask, pocket_xyz
+
+        # Catalytic-residue soft indicator for NAC bias. UniProt annotation
+        # (is_active_site / is_binding_site) is treated as strong evidence;
+        # the amino-acid-type prior is a weaker (0.5) fallback when the
+        # enzyme has no catalytic-site annotation.
+        is_annot = (node_s[:, 21] + node_s[:, 22]).clamp(max=1.0)  # (N_total,)
+        cat_idx = torch.tensor(self._CATALYTIC_AA_IDX,
+                               device=self.device, dtype=torch.long)
+        is_aa = node_s[:, cat_idx].sum(dim=-1).clamp(max=1.0)     # (N_total,)
+        cat_score = torch.maximum(is_annot, 0.5 * is_aa)
+        cat_dense, _ = to_dense_batch(cat_score, batch)           # (B, K)
+
+        return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
 
     def _encode_annot(self, G, B):
         if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
@@ -405,15 +434,37 @@ class V4Ultimate(pl.LightningModule):
 
         # Encode all modalities
         _, enz_pool, _ = self._encode_enzyme(G, B)
-        atom_tokens, graph_emb, atom_mask = self._encode_substrate(G, B)
+        atom_tokens, graph_emb, atom_mask, rxn_center_dense = \
+            self._encode_substrate(G, B)
         rxn_emb = self._encode_rxn(G, B)
-        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz = self._encode_pocket(G, B)
+        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz, pocket_cat = \
+            self._encode_pocket(G, B)
         annot_emb = self._encode_annot(G, B)
         cond_emb = self._encode_condition(G, B)
         ec_emb = self._encode_ec(G, B)
 
         # Fuse enzyme: baseline enzyme embedding mixes seq + condition (+ maybe more)
         enz_fused = enz_pool + cond_emb
+
+        # ── Modality dropout ──
+        # During training, drop each auxiliary modality with a config-level
+        # probability per sample. The same survival mask is applied to (a) the
+        # pooled embedding used by gates and (b) the final y_* contribution,
+        # so "dropped" truly means the branch contributes zero for that
+        # sample. Inference always keeps all modalities — dropout only
+        # regularizes training. This lets us ablate modalities at test time
+        # (e.g. inference without pocket) without retraining from scratch.
+        md = self.config["model"].get("modality_dropout", {}) or {}
+        def _keep(p):
+            if (not self.training) or p <= 0.0:
+                return torch.ones(B, 1, device=self.device)
+            return (torch.rand(B, 1, device=self.device) >= float(p)).float()
+        keep_rxn    = _keep(md.get("rxn",    0.0))
+        keep_pocket = _keep(md.get("pocket", 0.0))
+        keep_annot  = _keep(md.get("annot",  0.0))
+        rxn_emb    = rxn_emb    * keep_rxn
+        pocket_pool = pocket_pool * keep_pocket
+        annot_emb  = annot_emb  * keep_annot
 
         # ── Branches ──
         y_seq = self.head_seq(enz_fused)
@@ -437,6 +488,7 @@ class V4Ultimate(pl.LightningModule):
                 pocket_tokens, atom_tokens, pocket_mask, atom_mask,
                 xyz_p=pocket_xyz, xyz_a=atom_xyz,
                 xyz_valid_per_sample=xyz_valid_per_sample,
+                p_nac=pocket_cat, a_nac=rxn_center_dense,
             )
             y_int3d = self.head_int3d(torch.cat([p_pool_int, a_pool_int], dim=-1))
         else:
@@ -444,6 +496,15 @@ class V4Ultimate(pl.LightningModule):
 
         y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens is not None else torch.zeros(B, 1, device=self.device)
         y_annot  = self.head_annot(annot_emb)  if self.use_annot  else torch.zeros(B, 1, device=self.device)
+
+        # Modality dropout at output level. Heads on zeroed embeddings still
+        # emit the head bias term, so we explicitly zero the y_* contribution
+        # for dropped samples. keep_* is all-ones during inference (see
+        # _keep), so eval metrics are unaffected.
+        y_rxn    = y_rxn    * keep_rxn
+        y_struct = y_struct * keep_pocket
+        y_int3d  = y_int3d  * keep_pocket
+        y_annot  = y_annot  * keep_annot
 
         # ── Gates ──
         pair_gate_in = [enz_fused, graph_emb]

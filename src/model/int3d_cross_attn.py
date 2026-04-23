@@ -56,6 +56,12 @@ class Int3DCrossAttnLayer(nn.Module):
         # Distance bias projections (shared across directions)
         self.dist_proj = nn.Linear(n_rbf, n_heads)
 
+        # Near-attack conformation (NAC) bias: per-head learnable gain
+        # applied to the outer product of (catalytic residue indicator) ×
+        # (reaction-center atom indicator). Init at zero so behavior matches
+        # prior checkpoints unless the model learns to turn it on.
+        self.nac_gain = nn.Parameter(torch.zeros(n_heads))
+
         self.p_out = nn.Linear(hidden_dim, hidden_dim)
         self.a_out = nn.Linear(hidden_dim, hidden_dim)
         self.ln_p = nn.LayerNorm(hidden_dim)
@@ -86,7 +92,9 @@ class Int3DCrossAttnLayer(nn.Module):
                 p_mask: torch.Tensor, a_mask: torch.Tensor,
                 xyz_p: Optional[torch.Tensor] = None,
                 xyz_a: Optional[torch.Tensor] = None,
-                xyz_valid_per_sample: Optional[torch.Tensor] = None):
+                xyz_valid_per_sample: Optional[torch.Tensor] = None,
+                p_nac: Optional[torch.Tensor] = None,
+                a_nac: Optional[torch.Tensor] = None):
         """
         p_tokens (B, K, D), a_tokens (B, A, D)
         p_mask   (B, K) bool, a_mask (B, A) bool  (True = valid)
@@ -98,6 +106,11 @@ class Int3DCrossAttnLayer(nn.Module):
                                          fallback. This prevents one valid
                                          sample enabling fake distance bias
                                          for invalid zero-coord samples.
+        p_nac    (B, K) float in [0,1] — catalytic-residue indicator
+        a_nac    (B, A) float in [0,1] — reaction-center atom indicator
+                 Their outer product is added as a learnable per-head bias
+                 to the attention logits, nudging attention toward
+                 catalytic residue ↔ reacting atom pairs (NAC proxy).
         """
         B, K, _ = p_tokens.shape
         _, A, _ = a_tokens.shape
@@ -112,6 +125,16 @@ class Int3DCrossAttnLayer(nn.Module):
                 bias = bias * v
         else:
             bias = None
+
+        # NAC bias: catalytic × reaction-center outer product, per-head gain.
+        # Kept as a separate additive term so distance and NAC signals are
+        # independent (and either can be learned off).
+        if p_nac is not None and a_nac is not None:
+            nac_outer = (p_nac.float().unsqueeze(-1)
+                         * a_nac.float().unsqueeze(-2))          # (B, K, A)
+            nac_bias = (nac_outer.unsqueeze(1)
+                        * self.nac_gain.view(1, -1, 1, 1))       # (B, H, K, A)
+            bias = nac_bias if bias is None else (bias + nac_bias)
 
         # Pocket ← atom (Q from pocket, K/V from atom)
         Qp = self._split_heads(self.p_q(p_tokens))   # (B, H, K, d_head)
@@ -170,11 +193,13 @@ class Int3DCrossAttn(nn.Module):
 
     def forward(self, p_tokens, a_tokens, p_mask, a_mask,
                 xyz_p=None, xyz_a=None,
-                xyz_valid_per_sample=None):
+                xyz_valid_per_sample=None,
+                p_nac=None, a_nac=None):
         p, a = p_tokens, a_tokens
         for layer in self.layers:
             p, a = layer(p, a, p_mask, a_mask, xyz_p, xyz_a,
-                         xyz_valid_per_sample=xyz_valid_per_sample)
+                         xyz_valid_per_sample=xyz_valid_per_sample,
+                         p_nac=p_nac, a_nac=a_nac)
         p_pool = self._attn_pool(p, p_mask, self.pool_p)  # (B, D)
         a_pool = self._attn_pool(a, a_mask, self.pool_a)  # (B, D)
         return p, a, p_pool, a_pool

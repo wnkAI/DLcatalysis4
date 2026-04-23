@@ -54,6 +54,14 @@ model:
   use_condition: true
   use_ec: true
 
+  # Per-sample modality dropout at training time only. Zeroes both the
+  # gate-visible embedding and the final y_* contribution of the branch
+  # for a random subset of the batch. Inference keeps every modality.
+  modality_dropout:
+    rxn:    0.15      # drop DRFP reaction branch
+    pocket: 0.15      # drop pocket + int3d together (shared signal)
+    annot:  0.15      # drop InterPro/Pfam/GO branch
+
   seq_module:
     seq_hidden_dim: 512
 

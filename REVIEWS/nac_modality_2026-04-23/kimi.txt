@@ -1,0 +1,1092 @@
+--- Logging error in Loguru Handler #1 ---
+Record was: {'elapsed': datetime.timedelta(seconds=14, microseconds=264341), 'exception': None, 'extra': {'session_id': '7c11066f-3359-43ed-9872-03c8178a93d8'}, 'file': (name='__init__.py', path='C:\\Users\\wnkfr\\AppData\\Roaming\\uv\\tools\\kimi-cli\\Lib\\site-packages\\kimi_cli\\cli\\__init__.py'), 'function': '_run', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 524, 'message': 'Created new session: 7c11066f-3359-43ed-9872-03c8178a93d8', 'module': '__init__', 'name': 'kimi_cli.cli', 'process': (id=122808, name='MainProcess'), 'thread': (id=96204, name='MainThread'), 'time': datetime(2026, 4, 23, 23, 29, 0, 686327, tzinfo=datetime.timezone(datetime.timedelta(seconds=3600), 'GMT 夏令时'))}
+Traceback (most recent call last):
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_handler.py", line 206, in emit
+    self._sink.write(str_record)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_file_sink.py", line 204, in write
+    self._terminate_file(is_rotating=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_file_sink.py", line 276, in _terminate_file
+    os.rename(old_path, renamed_path)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Users\\wnkfr\\.kimi\\logs\\kimi.log' -> 'C:\\Users\\wnkfr\\.kimi\\logs\\kimi.2026-04-18_07-28-43_901007.log'
+--- End of logging error ---
+• The user wants me to read two files in the workspace and report bugs related
+  to cross-file consistency. Let me first check if these files exist and read t
+  hem.
+• Used ReadFile (REVIEWS/nac_modality_2026-04-23/BRIEF.md)
+• Used ReadFile (REVIEWS/nac_modality_2026-04-23/diff.patch)
+• The diff.patch is truncated at 1000 lines. I need to continue reading it and
+  also read the source files mentioned (int3d_cross_attn.py and v4_ultimate.py)
+  to check cross-file consistency. Let me first read the rest of the diff and t
+  he source files.
+• Used ReadFile (REVIEWS/nac_modality_2026-04-23/diff.patch)
+• Used ReadFile (src/model/int3d_cross_attn.py)
+• Used ReadFile (src/model/v4_ultimate.py)
+• Now I need to check if there are other files that call _encode_pocket or _enc
+  ode_substrate to see if the changed arities break downstream code. Let me als
+  o check the data module for modality_dropout config handling and any training
+  drivers.
+
+  Let me search for usages of _encode_pocket and _encode_substrate across the c
+  odebase, and also look at any other model files that might inherit from or ca
+  ll these methods.
+• Used Grep (_encode_pocket|_encode_substrate)
+• Used Grep (modality_dropout)
+• Used Grep (p_nac|a_nac)
+• Let me read v4_pocket.py and v4_innovate.py to see if they call the changed m
+  ethods or have their own copies. Also need to check v4_minimal.py for _encode
+  _substrate arity.
+• Used ReadFile (src/model/v4_pocket.py)
+• Used ReadFile (src/model/v4_innovate.py)
+• Used ReadFile (src/model/v4_minimal.py)
+• Let me analyze what I've found:
+
+  1. p_nac / a_nac kwargs in int3d_cross_attn.py vs v4_ultimate.py invocation:
+    • int3d_cross_attn.py: Int3DCrossAttnLayer.forward accepts p_nac and a_nac
+      ptional kwargs. Int3DCrossAttn.forward also accepts them and passes them
+      ugh.
+    • v4_ultimate.py: Calls self.int3d(..., p_nac=pocket_cat, a_nac=rxn_center_
+      e) — this matches.
+  2. modality_dropout config key:
+    • In v4_ultimate.py forward: md = self.config["model"].get("modality_dropou
+      {}) or {}
+    • The config v4_ultimate.yml has modality_dropout under model: section.
+    • But wait — looking at the diff patch, modality_dropout is added to config
+      ultimate.yml under model:.
+    • However, in the ablation configs (A0-A8), I don't see modality_dropout be
+      added. The ablation generator script only copies/overrides feature flags
+      LADDER. It doesn't strip modality_dropout, but since it does copy.deepcop
+      se), the base config had modality_dropout... wait, let me check. The diff
+      ws modality_dropout added to config/v4_ultimate.yml. The ablation generat
+      tarts from base and applies overrides. So ablation configs would inherit
+      lity_dropout from base. But the ablation configs shown in the diff (A0-A8
+      NOT contain modality_dropout — wait, the diff only shows the top portion
+      blation configs, let me check if they're truncated... Actually the diff f
+      blation configs only shows up to line ~500 and they don't include modalit
+      opout. But the generator does copy.deepcopy(base) so they should inherit
+      That seems okay.
+     Wait, there's a potential issue: md = self.config["model"].get("modality_d
+     out", {}) or {} — if the config doesn't have modality_dropout, it defaults
+     empty dict, which means no dropout. That's safe.
+  3. Downstream files breaking due to changed arities:
+    • v4_pocket.py: Has its OWN _encode_substrate (returns 3-tuple: atom_tokens
+      aph_emb, atom_mask) and _encode_pocket (returns 4-tuple). It does NOT cal
+      _ultimate's methods. So it's unaffected.
+    • v4_innovate.py: Has its OWN _encode_substrate (returns 4-tuple: atom_toke
+      graph_emb, atom_mask, batch) and _encode_pocket (returns 4-tuple). It's a
+      ferent class. Unaffected.
+    • v4_minimal.py: Has its OWN _encode_substrate (returns 3-tuple). Unaffecte
+     So no downstream files break due to changed arities because each model fil
+     efines its own methods.
+
+  Wait, but I should also check if there are training drivers that instantiate
+  these models or if there's any shared base class. Let me search for any impor
+  ts or inheritance.
+
+  Also, I need to look for bugs in the actual logic:
+
+  1. In v4_ultimate.py _encode_substrate:
+    • When G.MOL_graph_x is None, returns None, z, None, None.
+    • When hasattr(G, "MOL_rxn_center") but atom_mask is None — rxn_center_dens
+      ays None.
+    • But wait, atom_mask comes from self.substrate_gnn(...). If G.MOL_graph_x
+      ts, atom_mask should be returned. But what if atom_mask is None? Then rxn
+      ter_dense = None because of the and atom_mask is not None check.
+    • In forward(), rxn_center_dense is passed as a_nac to int3d. If a_nac is N
+      int3d_cross_attn handles it gracefully (skips NAC bias). That's fine.
+  2. In v4_ultimate.py _encode_pocket:
+    • When not self.use_pocket or not hasattr(G, "POCKET_node_s"), returns (Non
+      eros, None, None, None).
+    • In forward(), pocket_cat (5th return value) will be None when pocket is d
+      led.
+    • Passed as p_nac=pocket_cat to int3d. If p_nac is None, int3d skips NAC bi
+      Fine.
+  3. Potential bug: _encode_pocket cat_dense when use_pocket=True but node_s do
+     't have expected columns?
+    • is_annot = (node_s[:, 21] + node_s[:, 22]).clamp(max=1.0) — assumes node_
+      s at least 23 columns. The brief says pocket features node_s shape is (K,
+      with cols 0..19 = AA one-hot, col 20 = pLDDT, col 21 = is_active_site, co
+      = is_binding_site. So 21 and 22 are valid.
+    • is_aa = node_s[:, cat_idx].sum(dim=-1).clamp(max=1.0) — cat_idx = (1, 3,
+      , 8, 11, 15, 18). These are valid indices for 20-dim one-hot (0..19). Fin
+  4. Potential bug: pocket_cat dtype/device in _encode_pocket:
+    • cat_idx = torch.tensor(self._CATALYTIC_AA_IDX, device=self.device, dtype=
+      h.long) — device is correctly set.
+    • cat_score computed on node_s which is already on device. to_dense_batch(c
+      core, batch) should work.
+    • But wait: cat_dense is returned but in forward(), when use_int3d is True,
+      ket_tokens must also not be None. That's checked.
+  5. Potential bug: _log_diag references y_rxn even when use_rxn_drfp=False:
+    • In forward, y_rxn = self.head_rxn(rxn_emb) if self.use_rxn_drfp else torc
+      ros(B, 1, device=self.device)
+    • Then _log_diag logs y_rxn_abs. That's fine — it'll be zeros.
+    • But what about self.head_rxn? If use_rxn_drfp=False, self.head_rxn doesn'
+      ist! Wait, let's check:
+      • In __init__: if self.use_rxn_drfp: self.head_rxn = _mkhead(self.hidden_
+      • In forward: y_rxn = self.head_rxn(rxn_emb) if self.use_rxn_drfp else to
+        ros(B, 1, device=self.device)
+      • This is fine because it only accesses self.head_rxn when use_rxn_drfp i
+        .
+  6. Potential bug: y_struct head access when use_pocket=False:
+    • In __init__: if self.use_pocket: self.head_struct = _mkhead(self.hidden_d
+    • In forward: y_struct = self.head_struct(pocket_pool) if self.use_pocket a
+      ocket_tokens is not None else torch.zeros(B, 1, device=self.device)
+    • Fine.
+  7. Potential bug: y_int3d head access when use_int3d=False:
+    • In __init__: if self.use_int3d: self.head_int3d = _mkhead(self.hidden_dim
+      )
+    • In forward: y_int3d = self.head_int3d(...) only when use_int3d and tokens
+      None. Fine.
+  8. Potential bug: keep_pocket applied to pocket_pool before y_struct and y_in
+     :
+    • pocket_pool = pocket_pool * keep_pocket
+    • Then y_struct = self.head_struct(pocket_pool) if ... — head gets zeroed e
+      ding.
+    • Then y_struct = y_struct * keep_pocket — zeros output too.
+    • But g_struct uses pocket_pool in its input: struct_in = [enz_fused, graph
+      , pocket_pool, quality]. Since pocket_pool is zeroed for dropped samples,
+      gate will see zeroed pocket embedding. That's the intended behavior (embe
+      vel dropout).
+    • Similarly for y_int3d, the int3d module gets pocket_tokens (NOT zeroed) b
+      ocket_pool is zeroed. The int3d module outputs p_pool_int which is comput
+      rom pocket_tokens, not from pocket_pool. So y_int3d might still get non-z
+      p_pool_int even when pocket is "dropped". But then y_int3d = y_int3d * ke
+      ocket zeros it at output. This is intentional per the comment.
+  9. Potential bug: g_pair uses rxn_emb AFTER rxn_emb = rxn_emb * keep_rxn:
+    • The comment says dropout is applied to "pooled embedding used by gates an
+      ) final y_*". Since rxn_emb is zeroed before gate computation, g_pair wil
+      e zero rxn_emb for dropped samples. That's intended.
+  10. Potential bug: g_annot uses annot_emb AFTER annot_emb = annot_emb * keep_
+      t:
+    • Same as above — intended.
+  11. Potential bug: _log_diag called with atom_mask and pocket_mask which coul
+      None:
+    • has_atoms = float(atom_mask.any().item()) if atom_mask is not None else 0
+      handles None.
+    • has_pocket = float(pocket_mask.any().item()) if pocket_mask is not None e
+      0.0 — handles None.
+    • Fine.
+  12. Potential bug: _log_diag uses G.ANNOT_has_any and G.ANNOT_has_cof without
+      cking hasattr first?
+    • Wait, looking at the code:
+      if hasattr(G, "ANNOT_has_any"):
+      _log("cov_annot", G.ANNOT_has_any.float().mean())
+      if hasattr(G, "ANNOT_has_cof"):
+      _log("cov_cof", G.ANNOT_has_cof.float().mean())
+    • Yes, it checks hasattr. Fine.
+  13. Potential bug: cov_rxn_drfp diagnostic uses has_rxn = float(hasattr(G, "R
+      rfp"))
+    • hasattr(G, "RXN_drfp") returns bool. float(True) is 1.0. But this is per-
+      h, not per-sample. The log is a scalar. It's a bit misleading because it
+      "fraction of the batch with real signal" but it's actually just 1.0 if AN
+      tch in the dataloader has the attribute. Since the data representer alway
+      taches the key or never does, this is effectively a constant. Not a bug p
+      e, just imprecise metric naming, but the user asked for bugs only.
+  14. Potential bug: md = self.config["model"].get("modality_dropout", {}) or {
+    • This reads correctly. If modality_dropout is missing or None, defaults to
+  15. Potential bug: In ablation configs, modality_dropout is inherited from ba
+      onfig.
+    • Wait, looking at the diff for ablation configs, they don't explicitly con
+      modality_dropout. The ablation generator script does:
+      cfg = copy.deepcopy(cur)
+      for k, v in flags.items():
+      cfg["model"][k] = v
+      It doesn't remove modality_dropout. So ablation configs will have it from
+      base.
+    • But the ablation configs shown in the diff don't show modality_dropout. A
+      lly, the diff for each ablation config only shows part of the file (up to
+      0 lines). The modality_dropout section in base config is after use_ec: tr
+      nd before seq_module:. Let me check if the ablation generator might have
+      ridden it... No, the generator only overrides use_* flags. modality_dropo
+      tays.
+    • However, this could be a problem: ablation configs like A0 (seq only) wou
+      till have modality_dropout: {rxn: 0.15, pocket: 0.15, annot: 0.15}. Since
+      _rxn_drfp=False, rxn_emb is zeros anyway, and dropout on zeros is still z
+      . Similarly for pocket and annot when disabled. So it's harmless. Not a b
+  16. Potential bug: pocket_pool used in g_struct but also used for y_struct af
+      dropout multiplication.
+    • pocket_pool = pocket_pool * keep_pocket happens before both y_struct and
+      ruct computation. Fine.
+  17. Potential bug: y_int3d depends on pocket_tokens and atom_tokens which are
+      dropped.
+    • The comment says "drop pocket + int3d together (shared signal)". The drop
+      is applied at output level (y_int3d = y_int3d * keep_pocket) and to pocke
+      ol embedding. But pocket_tokens going into int3d are not zeroed. So the c
+      -attention still runs and p_pool_int may be non-zero even for dropped sam
+      . The output zeroing prevents the signal from reaching the prediction. Th
+      s intentional based on the comment "The same survival mask is applied to
+      the pooled embedding used by gates and (b) the final y_* contribution". I
+      esn't say tokens are dropped. So not a bug.
+  18. Potential bug: nac_gain gradient flow.
+    • nac_gain is a nn.Parameter. In int3d_cross_attn.py, it's multiplied by na
+      ter which requires grad if p_nac and a_nac have grad (they don't, they're
+      uts from data/features). But nac_bias is added to bias, which is added to
+      its_p. The softmax and subsequent operations will backprop to nac_gain. S
+      nac_gain is a parameter, it will get gradients. Fine.
+  19. Potential bug: _encode_pocket returns cat_dense computed using node_s[:,
+      idx].
+    • node_s[:, cat_idx] — if node_s is float and cat_idx is long, this does in
+      select on dim 1. This works. But wait: node_s shape is (N_total, 26). cat
+      has values like 1, 3, 4...18. These are valid. sum(dim=-1) gives (N_total
+      Fine.
+  20. Potential bug: is_annot = (node_s[:, 21] + node_s[:, 22]).clamp(max=1.0)
+    • If node_s[:, 21] and node_s[:, 22] are both 1.0, sum is 2.0, clamped to 1
+      Fine.
+  21. Potential bug: _encode_substrate when use_rxn_center=True but G.MOL_rxn_c
+      r doesn't exist?
+    • if self.use_rxn_center and hasattr(G, "MOL_rxn_center"): — checks hasattr
+      ne.
+  22. Potential bug: _encode_substrate rxn_center_dense computed with center_fl
+      ong.float() but a_nac docstring says float in [0,1].
+    • G.MOL_rxn_center is likely 0/1. float() gives 0.0/1.0. Fine.
+  23. Potential bug: In v4_ultimate.py, _encode_pocket returns None for pocket_
+      when pocket disabled, but in forward, p_nac=pocket_cat is passed uncondit
+      lly to int3d.
+    • Wait, let me check: in forward,
+      pocket_tokens, pocket_pool, pocket_mask, pocket_xyz, pocket_cat = \
+      self._encode_pocket(G, B)
+      Then later:
+      if self.use_int3d and pocket_tokens is not None and atom_tokens is not No
+      nd pocket_mask is not None:
+      ...
+      _, _, p_pool_int, a_pool_int = self.int3d(
+          pocket_tokens, atom_tokens, pocket_mask, atom_mask,
+          xyz_p=pocket_xyz, xyz_a=atom_xyz,
+          xyz_valid_per_sample=xyz_valid_per_sample,
+          p_nac=pocket_cat, a_nac=rxn_center_dense,
+      )
+      If use_pocket=False, pocket_tokens is None, so the if block is skipped. p
+      t_cat being None is never passed to int3d. Fine.
+  24. Potential bug: int3d called when use_int3d=True but use_pocket=False.
+    • The condition is self.use_int3d and pocket_tokens is not None and atom_to
+      is not None and pocket_mask is not None. If use_pocket=False, pocket_toke
+      s None, so int3d is skipped. Fine.
+  25. Potential bug: pocket_mask used in _log_diag even when use_pocket=False?
+    • pocket_mask is None when pocket is disabled. _log_diag handles it with if
+      ket_mask is not None else 0.0. Fine.
+  26. Wait, I need to check if there's a training driver that reads modality_dr
+      t or if data loader needs to change.
+    • No training driver changes in the diff.
+    • The data module doesn't need changes because modality dropout happens ins
+      the model forward.
+  27. Potential bug: md = self.config["model"].get("modality_dropout", {}) or {
+      what if config has modality_dropout: null?
+    • or {} handles None/null. Fine.
+  28. Potential bug: keep_pocket applied to pocket_pool but pocket_pool is also
+      d in pair_gate_in?
+    • No, pair_gate_in uses enz_fused and graph_emb, plus optionally rxn_emb an
+      _emb. It does NOT include pocket_pool. So pocket_pool dropout doesn't aff
+      pair gate. That's correct.
+  29. Potential bug: y_rxn = self.head_rxn(rxn_emb) where rxn_emb has been zero
+      y dropout.
+    • The head still computes output, but since input is zeroed, output is just
+      head bias. Then y_rxn = y_rxn * keep_rxn zeros it. This is exactly what t
+      omment says: "Heads on zeroed embeddings still emit the head bias term, s
+      explicitly zero the y_* contribution". Fine.
+  30. Potential bug: _encode_substrate returns rxn_center_dense computed using
+      ense_batch(center_flag_long.float(), graph_batch).
+    • If atom_mask is None (which shouldn't happen if MOL_graph_x exists), rxn_
+      er_dense stays None. But if G.MOL_graph_x exists, self.substrate_gnn retu
+      atom_tokens, graph_emb, atom_mask. atom_mask could theoretically be None
+      he GNN returns it as None. In that case, rxn_center_dense is not computed
+      t then in forward, a_nac=rxn_center_dense would be None. int3d handles No
+      racefully. Not a bug.
+  31. Potential bug: v4_pocket.py _encode_pocket returns 4 values, but v4_ultim
+      py now returns 5. But v4_pocket.py has its own definition.
+    • Wait, what about inheritance? Does v4_pocket inherit from v4_ultimate? No
+      ey're separate LightningModule classes. Each defines its own methods. The
+      p results confirm v4_pocket defines its own _encode_substrate and _encode
+      ket. So no cross-file breakage.
+  32. Wait, is there any file that imports _encode_pocket or _encode_substrate
+      unctions?
+    • No, they're instance methods.
+  33. Is there a bug in v4_ultimate.py where _encode_pocket returns a tuple but
+      early return path returns (None, zeros, None, None, None) while the norma
+      th returns p_tokens, p_pool, p_mask, pocket_xyz, cat_dense?
+    • That's consistent — 5 values in both cases.
+  34. Is there a bug in _encode_substrate early return?
+    • Returns None, z, None, None. That's 4 values. Normal path returns atom_to
+      , graph_emb, atom_mask, rxn_center_dense. Also 4 values. Consistent.
+  35. Is there a bug in int3d_cross_attn.py where nac_bias is added to bias for
+      its_a via bias.transpose(-1, -2)?
+    • logits_a = logits_a + bias.transpose(-1, -2) — if bias includes both dist
+      bias and NAC bias, transposing it for the atom→pocket direction means the
+      outer product (B, H, K, A) becomes (B, H, A, K). But NAC is symmetric in
+      sense that p_nac ⊗ a_nac transposed is a_nac ⊗ p_nac, which is the same v
+      s transposed. So nac_bias.transpose(-1, -2) would be (a_nac ⊗ p_nac) * na
+      in, which is correct for the reverse direction because the outer product
+      ust transposed. Wait, is that right?
+    • nac_outer is (B, K, A). nac_bias is (B, H, K, A).
+    • For pocket→atom: we want bias[pocket_i, atom_j] = p_nac[i] * a_nac[j] * g
+      That's nac_outer[i, j].
+    • For atom→pocket: we want bias[atom_j, pocket_i] = a_nac[j] * p_nac[i] * g
+      = nac_outer[i, j] (since multiplication commutes). So transposing the las
+      o dims is correct. This is fine.
+  36. Potential bug: distance bias is transposed for atom→pocket direction too.
+    • _dist_bias computes torch.cdist(xyz_p, xyz_a) which is (B, K, A). This is
+      metric under transpose only if distance matrix is symmetric, which it is:
+      t(p_i, a_j) = dist(a_j, p_i). So transposing is correct. Fine.
+  37. Potential bug: nac_gain not included in _init_weights or any special init
+    • It's initialized to zeros via torch.zeros(n_heads). The _init_weights in
+      ltimate does Xavier uniform on Linear layers. nac_gain is a Parameter, no
+      Linear, so it's skipped. That's fine — zeros init is intentional.
+  38. Potential bug: p_nac and a_nac shapes when passed to int3d_cross_attn?
+    • pocket_cat from _encode_pocket is (B, K) via to_dense_batch.
+    • rxn_center_dense from _encode_substrate is (B, A) via to_dense_batch.
+    • In Int3DCrossAttnLayer.forward, p_nac is expected (B, K) and a_nac is (B,
+    • p_tokens shape is (B, K, D), a_tokens is (B, A, D).
+    • This matches.
+  39. Potential bug: p_mask shape is (B, K) but in _attn_pool it does mask.any(
+  1) — if p_mask is a bool tensor from to_dense_batch, that's fine.
+  40. Potential bug: In _encode_pocket, is_annot = (node_s[:, 21] + node_s[:, 2
+      clamp(max=1.0)
+    • If node_s is float and values are 0.0/1.0, this works. But what if they'r
+      olean-like ints? 1 + 1 = 2, clamped to 1. Fine.
+  41. Wait, I should check if _encode_pocket in v4_ultimate.py uses node_s[:, c
+      dx] where node_s is (N_total, 26) and cat_idx values go up to 18.
+    • The brief says cols 0..19 = AA one-hot. So index 18 is valid. Fine.
+  42. Is there any bug where v4_ultimate.py forward uses self.head_rxn but self
+      d_rxn doesn't exist when use_rxn_drfp=False?
+    • Already checked — guarded by if self.use_rxn_drfp. Fine.
+  43. Is there a bug in _log_diag when self._trainer is not None but we're in i
+      ence/test mode?
+    • The check is if getattr(self, "_trainer", None) is not None:. During test
+      , self._trainer exists, so diagnostics are logged. The comment says "once
+      rainer is attached" and "so the model still runs standalone". This means
+      nostics run during train/val/test as long as trainer exists. The BRIEF sa
+      iagnostics might leak info between train/val/test, but the code logs with
+      step=False, on_epoch=True, which is standard and doesn't leak between spl
+      because each split is a separate dataloader and Lightning handles epoch b
+      aries per split. Not a bug.
+  44. Potential bug: _log_diag logs cov_rxn_drfp as float(hasattr(G, "RXN_drfp"
+      this is constant per dataset, not per batch.
+    • It logs once per epoch. It's a scalar tensor. It's not very useful but no
+      bug.
+  45. Wait, let me look more carefully at _encode_substrate in v4_ultimate.py:
+      rxn_center_dense = None
+      if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
+      from torch_geometric.utils import to_dense_batch
+      center_flag_long = G.MOL_rxn_center.to(self.device).long()
+      rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
+                                           graph_batch)            # (B, A)
+      # Add RXNMapper center flag to atom tokens (if enabled)
+      if self.use_rxn_center and hasattr(G, "MOL_rxn_center"):
+      from torch_geometric.utils import to_dense_batch
+      center_flag = G.MOL_rxn_center.to(self.device).long()
+      center_dense, _ = to_dense_batch(center_flag, graph_batch)   # (B, A)
+      center_emb = self.rxn_center_emb(center_dense)               # (B, A, D)
+      ...
+    • If use_rxn_center=True and hasattr(G, "MOL_rxn_center"), to_dense_batch i
+      lled TWICE — once for rxn_center_dense (always, if atom_mask not None) an
+      ce inside the if self.use_rxn_center block. This is redundant but not a b
+  46. Potential bug: center_flag_long.float() vs center_flag (long) passed to t
+      nse_batch.
+    • to_dense_batch accepts any tensor. center_flag is long, so center_dense w
+      be long. Then self.rxn_center_emb(center_dense) works because Embedding a
+      ts LongTensor.
+    • rxn_center_dense is float (because .float() is called). This is correct f
+      _nac which expects float [0,1].
+  47. Wait, what if G.MOL_rxn_center exists but atom_mask is None?
+    • In that case, rxn_center_dense stays None. But in the second block, if se
+      se_rxn_center and hasattr(G, "MOL_rxn_center"), to_dense_batch(center_fla
+      raph_batch) will still run. And center_dense will be created. Then center
+      = self.rxn_center_emb(center_dense) will work. And m = atom_mask.unsqueez
+      ).float() — if atom_mask is None, this will crash!
+    • But wait, atom_mask comes from self.substrate_gnn(...). Can self.substrat
+      n return atom_mask=None?
+    • Let me check substrate_gnn.py to see if it ever returns None for atom_mas
+
+  Actually, looking at the substrate_gnn return pattern: it returns atom_tokens
+  , graph_emb, atom_mask. In normal operation, atom_mask should not be None. Th
+  e only way atom_mask is None is if the GNN explicitly returns None. Let me ch
+  eck.
+
+  But more importantly: the early return path in _encode_substrate checks if no
+  t hasattr(G, "MOL_graph_x") or G.MOL_graph_x is None: and returns None, z, No
+  ne, None. So atom_mask is only None when there's no graph. In that case, the
+  second block if self.use_rxn_center and hasattr(G, "MOL_rxn_center") could st
+  ill execute if hasattr(G, "MOL_rxn_center") is true, because the early return
+  only checks MOL_graph_x. But if MOL_graph_x is None, can MOL_rxn_center exist
+  ? Probably not in practice, but let's be precise.
+
+  Actually, if G.MOL_graph_x is None, the method returns early before reaching
+  the rxn_center code. So the atom_mask=None case in the second block only happ
+  ens if self.substrate_gnn(...) returns atom_mask=None. That's unlikely.
+
+  Let me check substrate_gnn.py to be safe.
+• Used ReadFile (src/model/substrate_gnn.py)
+• Now I have a complete picture. Let me analyze for actual bugs:
+
+  1. v4_pocket.py line 287-288 in forward: it calls int3d with old signature (n
+     _nac/a_nac). Let me check.
+    • Wait, v4_pocket.py line 286 says: if pocket_tokens is not None and atom_t
+      s is not None and pocket_mask is not None:
+    • Then it calls self.int3d(...) — I need to see the exact call.
+
+  Actually, looking at the diff.patch, only int3d_cross_attn.py and v4_ultimate
+  .py were modified in the source code. v4_pocket.py was NOT modified. But v4_p
+  ocket.py uses Int3DCrossAttn (imported). Since Int3DCrossAttn.forward now acc
+  epts optional p_nac and a_nac, and v4_pocket.py doesn't pass them, this is fi
+  ne — the old call signature still works because they're optional keyword argu
+  ments with defaults None.
+
+  But wait, the user asked: "Are there downstream files (training driver, data
+  loader, other models) that break because _encode_pocket and _encode_substrate
+  now return different arities?"
+
+  From my analysis:
+
+  • v4_pocket.py: defines its own _encode_pocket (returns 4-tuple) and _encode_
+    bstrate (returns 3-tuple). It doesn't call v4_ultimate's methods. So no bre
+    .
+  • v4_innovate.py: defines its own _encode_pocket (returns 4-tuple) and _encod
+    substrate (returns 4-tuple). No break.
+  • v4_minimal.py: defines its own _encode_substrate (returns 3-tuple). No brea
+
+  However, wait — I need to check if there's a training driver that imports V4U
+  ltimate or calls these methods. The methods are private instance methods, so
+  only called internally.
+
+  But there's something subtle: v4_pocket.py line 286+ calls self.int3d. Let me
+  check that call.
+• Used ReadFile (src/model/v4_pocket.py)
+• Let me review the findings:
+
+  1. Cross-file consistency: p_nac, a_nac kwargs in int3d_cross_attn.py vs v4_u
+     mate.py invocation:
+    • int3d_cross_attn.py: Int3DCrossAttnLayer.forward accepts optional p_nac a
+      _nac with defaults None.
+    • Int3DCrossAttn.forward also accepts them and passes through.
+    • v4_ultimate.py: calls self.int3d(..., p_nac=pocket_cat, a_nac=rxn_center_
+      e).
+    • This matches perfectly. No bug here.
+  2. modality_dropout config key reading:
+    • v4_ultimate.py line 457: md = self.config["model"].get("modality_dropout"
+      ) or {}
+    • config/v4_ultimate.yml has modality_dropout under model:.
+    • The ablation configs generated by 26_generate_ablation_configs.py inherit
+      m base via copy.deepcopy(base), so they keep modality_dropout.
+    • But wait, looking at the diff for ablation configs, they don't explicitly
+      w modality_dropout. However, the generator doesn't strip it. Let me doubl
+      eck if there could be an issue where ablation configs don't have it becau
+      he generator restructures the dict... No, it only overrides specific use_
+      ys.
+    • Actually, looking more carefully: the base config v4_ultimate.yml in the
+      has modality_dropout added. The ablation configs in the diff don't show i
+      cause the diff is truncated or because yaml.safe_dump outputs keys in ins
+      on order and the ablation diff only shows a subset? Wait, the ablation di
+      show the complete file from line 1 to end (107 lines). If modality_dropou
+      re there, it would appear between use_ec: true and seq_module:. Let me ch
+      the diff for A0... Actually, the A0 diff shows:
+      +  use_ec: false
+      +  seq_module:
+      It jumps from use_ec: false to seq_module:. This means modality_dropout i
+      T in the ablation configs. Why?
+      Looking at the generator script:
+      cur = copy.deepcopy(base)
+      flags = copy.deepcopy(LADDER[0][2])
+      for aid, tag, delta in LADDER:
+      flags.update(delta)
+      cfg = copy.deepcopy(cur)
+      for k, v in flags.items():
+          cfg["model"][k] = v
+      Wait! The generator does cfg = copy.deepcopy(cur) where cur = copy.deepco
+      ase). But then it only overrides flags.items() which are use_* keys. It d
+      NOT strip modality_dropout. So if base had modality_dropout, cfg should h
+      it too.
+      But the ablation config diffs don't show it. Let me re-read the base conf
+      iff more carefully.
+      In config/v4_ultimate.yml diff:
+      @@ -54,6 +54,14 @@ model:
+      use_condition: true
+      use_ec: true
+
+      +  # Per-sample modality dropout ...
+      +  modality_dropout:
+      +    rxn:    0.15
+      +    pocket: 0.15
+      +    annot:  0.15
+      +
+      seq_module:
+      So the base config has it. The ablation configs should inherit it. But th
+      lation diffs don't show it. Hmm, maybe the ablation configs were generate
+      FORE the base config was modified? Or maybe the diff is showing the ablat
+      configs as they were generated in the first commit, and modality_dropout
+      added in the second commit?
+      Wait, the BRIEF says:
+      1. Diagnostics + ablation scaffolding (commit 4f88914).
+      2. NAC bias + modality dropout (commit 18345ef).
+      The diff.patch contains both commits. The ablation configs might have bee
+      nerated from the base config BEFORE modality_dropout was added. But the c
+      g/v4_ultimate.yml diff shows modality_dropout being added. The ablation c
+      gs in the diff are shown as new files. If they were generated from the ba
+      onfig at the time of generation, and modality_dropout was added later in
+      same commit or a later commit, they might not have it.
+      Actually, looking at the diff.patch ordering: the ablation configs appear
+      ORE the config/v4_ultimate.yml modification. In git, the order in a diff
+      n't necessarily indicate temporal order, but the ablation configs could h
+      been generated without modality_dropout if the base didn't have it yet, O
+      e diff shows them without it because yaml.safe_dump doesn't include it fo
+      me reason.
+      Wait, if base at the time of generation had modality_dropout, then cur =
+      .deepcopy(base) would have it, and cfg = copy.deepcopy(cur) would have it
+      e yaml.safe_dump should output it. So why is it missing from the ablation
+      fs?
+      Let me count lines in A0: it has exactly the same keys as the original ba
+      onfig but without modality_dropout. The A0 diff shows use_ec: false then
+      diately seq_module:. This strongly suggests modality_dropout was NOT in t
+      ase config when the ablation configs were generated, OR the ablation conf
+      were generated from a base config that didn't have it.
+      But in the diff, config/v4_ultimate.yml is modified to ADD modality_dropo
+      The ablation configs are new files. If the commit that adds ablation conf
+      is separate from the one that adds modality dropout, the ablation configs
+      ht not include modality_dropout. But the generator script is part of the
+      t commit (diagnostics + ablation), while modality_dropout is part of the
+      nd commit (NAC bias + modality dropout). So the ablation configs in the p
+      were generated without modality_dropout.
+      This is actually fine for runtime because:
+      • v4_ultimate.yml (the full config) has modality_dropout.
+      • Ablation configs don't have it, but md = self.config["model"].get("moda
+        ropout", {}) or {} handles missing key gracefully (defaults to no dropo
+      • Is this a bug? The user might expect ablation configs to also have moda
+        ropout. But the BRIEF doesn't say ablation configs need dropout. If the
+        t is that ablation configs should also use modality dropout for consist
+        then missing it is a config inconsistency. But is it a "bug"?
+      Actually, ablation configs are meant to test individual modalities. Havin
+      dality dropout in ablation configs would mean randomly dropping the very
+      lity you're trying to ablate. That might be undesirable. So it's arguably
+      rect that ablation configs don't have modality dropout, OR they should ha
+      t set to 0. The current behavior (missing → no dropout) effectively sets
+      o 0, which is safe for ablation studies. Not a bug.
+  3. Downstream files breaking due to changed arities:
+    • v4_pocket.py: defines its own _encode_pocket (4-tuple) and _encode_substr
+      (3-tuple). It calls self.int3d without p_nac/a_nac, which is fine because
+      y're optional. No break.
+    • v4_innovate.py: defines its own _encode_pocket (4-tuple) and _encode_subs
+      e (4-tuple, but 4th is batch not rxn_center_dense). No break.
+    • v4_minimal.py: defines its own _encode_substrate (3-tuple). No break.
+    • Training driver / data loader: no changes needed, no breaks.
+     So there are NO downstream files that break.
+
+  Wait, I need to check if v4_pocket.py actually calls self.int3d with the old
+  signature. Yes, lines 303-307 show it calls without p_nac/a_nac. Since these
+  are optional with default None in Int3DCrossAttn.forward, this is backward co
+  mpatible. No bug.
+
+  Are there any actual bugs? Let me look for subtle issues.
+
+  Potential bug: _encode_pocket cat_dense device mismatch.
+
+  • cat_idx = torch.tensor(self._CATALYTIC_AA_IDX, device=self.device, dtype=to
+    h.long)
+  • node_s is on self.device (from G.POCKET_node_s.to(self.device)).
+  • is_aa = node_s[:, cat_idx].sum(dim=-1) — both on same device. Fine.
+
+  Potential bug: _encode_pocket when use_pocket=True but G.POCKET_node_s has fe
+  wer than 26 columns.
+
+  • If node_s shape is e.g. (N_total, 20) (no pocket feature columns beyond one
+    ot), then node_s[:, 21] will raise IndexError. But the brief says shape is
+    , 26), and the data pipeline (14_extract_pockets.py) is supposed to produce
+    his. If the data is stale, it crashes. But that's a data issue, not a code
+    g in the diff.
+
+  Potential bug: _encode_substrate rxn_center_dense is computed as center_flag_
+  long.float() which is 0.0 or 1.0.
+
+  • a_nac docstring says "float in [0,1]". This matches. Fine.
+
+  Potential bug: modality_dropout keep_pocket applied to pocket_pool but pocket
+  _pool is also used to compute n_res and quality for g_struct.
+
+  • Wait, n_res is computed from pocket_mask, not pocket_pool. pocket_mask is N
+    dropped. So n_res still reflects actual pocket size even for dropped sample
+  • has_annot_flag and has_cof come from G.ANNOT_has_any and G.ANNOT_has_cof, n
+    from pocket_pool.
+  • quality = torch.cat([n_res, has_annot_flag, has_cof], dim=-1) — this is not
+    ffected by keep_pocket.
+  • struct_in = [enz_fused, graph_emb, pocket_pool, quality] — pocket_pool is z
+    oed, but quality still has real values.
+  • Is this a bug? The gate g_struct will see zeroed pocket embedding but real
+    ality signals. That's probably fine — quality is an independent signal.
+
+  Wait, I found something: _encode_pocket when use_pocket=False returns None fo
+  r pocket_xyz. But in forward, pocket_xyz is passed to int3d as xyz_p=pocket_x
+  yz. However, if use_pocket=False, the if self.use_int3d and pocket_tokens is
+  not None... condition fails because pocket_tokens is None. So pocket_xyz=None
+  is never passed to int3d. Fine.
+
+  Wait, I found a potential issue: pocket_cat when use_pocket=False is None, an
+  d rxn_center_dense when substrate graph is missing is None. In int3d_cross_at
+  tn.py:
+
+  if p_nac is not None and a_nac is not None:
+      ...
+      bias = nac_bias if bias is None else (bias + nac_bias)
+
+  If one is None and the other is not, NAC bias is skipped entirely. Is this in
+  tentional? The docstring says "p_nac (B, K) float in [0,1] — catalytic-residu
+  e indicator, a_nac (B, A) float in [0,1] — reaction-center atom indicator". I
+  f one is missing, the outer product can't be computed. Skipping is the safe f
+  allback. This is correct.
+
+  Potential bug: _log_diag logs cov_pocket using pocket_mask.any().item().
+
+  • This is True if ANY sample in the batch has ANY valid pocket residue. It's
+    t the fraction of the batch. But it's logged as a scalar per epoch. The nam
+    g "cov_pocket" suggests coverage, but it's actually a binary indicator for
+    e batch. If a batch has at least one valid pocket, it's 1.0. If all batches
+    ave at least one valid pocket, it's always 1.0. This is misleading but not
+    crash bug. The BRIEF says diagnostics are there to catch issues. It might n
+    be very useful but it's not a code bug.
+
+  Wait, looking more carefully at cov_rxn_drfp: has_rxn = float(hasattr(G, "RXN
+  _drfp"))
+
+  • hasattr(G, "RXN_drfp") returns True/False. If the dataloader always attache
+    RXN_drfp (even if it's all zeros), this will always be 1.0. If it sometimes
+    oesn't attach it, it will be 0.0 for those batches. This is actually batch-
+    vel coverage (whether the batch has the attribute). But since PyG Batch obj
+    ts typically have consistent attributes across batches from the same datase
+    this is essentially constant. Again, not a crash bug.
+
+  Hmm, the user specifically asked me to focus on:
+
+  1. Do the new kwargs in int3d_cross_attn.py match how v4_ultimate.py invokes
+     m?
+  2. Does modality_dropout config key actually get read correctly?
+  3. Are there downstream files that break because _encode_pocket and _encode_s
+     trate now return different arities?
+
+  I should answer these directly.
+
+  But the user also said "Report bugs only, terse, no preamble." So if there ar
+  e no bugs, I should say so plainly.
+
+  Wait, let me look again for any subtle bug I might have missed.
+
+  In v4_ultimate.py, the _encode_pocket method:
+
+  is_annot = (node_s[:, 21] + node_s[:, 22]).clamp(max=1.0)  # (N_total,)
+  cat_idx = torch.tensor(self._CATALYTIC_AA_IDX,
+                         device=self.device, dtype=torch.long)
+  is_aa = node_s[:, cat_idx].sum(dim=-1).clamp(max=1.0)     # (N_total,)
+  cat_score = torch.maximum(is_annot, 0.5 * is_aa)
+  cat_dense, _ = to_dense_batch(cat_score, batch)           # (B, K)
+
+  If node_s is a bool or uint8 tensor (which it could be if the dataloader prod
+  uces it that way), node_s[:, 21] + node_s[:, 22] would do integer addition. B
+  ut node_s = G.POCKET_node_s.to(self.device).float() ensures it's float. Fine.
+
+  One more thing: pocket_cat shape.
+
+  • cat_dense shape from to_dense_batch(cat_score, batch) is (B, K_max). p_nac
+    pects (B, K). Since p_tokens is also (B, K_max, D) from to_dense_batch insi
+    pocket_gvp, K here is K_max (padded). So shapes match. Fine.
+
+  What about v4_pocket.py using Int3DCrossAttn without p_nac/a_nac?
+
+  • The Int3DCrossAttn.forward signature now includes p_nac=None, a_nac=None. S
+    ce v4_pocket.py calls it positionally/without these kwargs, Python will mat
+    the positional args correctly:
+    self.int3d(pocket_tokens, atom_tokens, pocket_mask, atom_mask,
+             xyz_p=pocket_xyz, xyz_a=atom_xyz,
+             xyz_valid_per_sample=xyz_valid_per_sample)
+    This maps to p_tokens, a_tokens, p_mask, a_mask, xyz_p=pocket_xyz, xyz_a=at
+    _xyz, xyz_valid_per_sample=xyz_valid_per_sample, p_nac=None, a_nac=None. Pe
+    ectly fine.
+
+  What about v4_innovate.py?
+
+  if (self.use_int3d and pocket_tokens is not None and
+          atom_tokens is not None and pocket_mask is not None and atom_mask is
+  not None):
+      interaction_weight = None
+      ...
+      _, _, p_pool_int, a_pool_int = self.int3d(
+          pocket_tokens, atom_tokens, pocket_mask, atom_mask,
+          xyz_p=pocket_xyz, xyz_a=atom_xyz,
+      )
+
+  Same as v4_pocket — it calls self.int3d without p_nac/a_nac. Fine.
+
+  So the kwargs match, modality_dropout is read correctly, and no downstream fi
+  les break.
+
+  But wait, is there a bug in how modality_dropout is read? Let me check the ex
+  act code:
+
+  md = self.config["model"].get("modality_dropout", {}) or {}
+
+  If the config is structured as:
+
+  model:
+    modality_dropout:
+      rxn: 0.15
+      pocket: 0.15
+      annot: 0.15
+
+  Then self.config["model"].get("modality_dropout", {}) returns {"rxn": 0.15, "
+  pocket": 0.15, "annot": 0.15}. The or {} is unnecessary but safe.
+
+  If someone writes:
+
+  model:
+    modality_dropout: null
+
+  Then .get("modality_dropout", {}) returns None, and or {} gives {}. Safe.
+
+  If someone writes:
+
+  model:
+    modality_dropout:
+      rxn: 0.0
+
+  Then md.get("rxn", 0.0) returns 0.0, _keep(0.0) returns ones. Safe.
+
+  Is there a bug where modality_dropout config key is under train: instead of m
+  odel:? The diff shows it under model:. The code reads self.config["model"]. C
+  orrect.
+
+  Are there any bugs related to _log_diag?
+
+  • _log_diag takes atom_mask and pocket_mask as arguments. In forward, these a
+    passed directly. But what if use_pocket=False? Then pocket_mask=None. _log_
+    ag has has_pocket = float(pocket_mask.any().item()) if pocket_mask is not N
+    e else 0.0. Fine.
+  • What if use_int3d=False? Then atom_tokens comes from _encode_substrate, so
+    om_mask is whatever _encode_substrate returns. If MOL_graph_x is None, atom
+    ask=None. _log_diag handles it. Fine.
+
+  Actually, I just noticed something in _encode_substrate:
+
+  rxn_center_dense = None
+  if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
+      from torch_geometric.utils import to_dense_batch
+      center_flag_long = G.MOL_rxn_center.to(self.device).long()
+      rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
+                                           graph_batch)            # (B, A)
+
+  If G.MOL_rxn_center exists but atom_mask is None, rxn_center_dense is not com
+  puted. But the next block:
+
+  if self.use_rxn_center and hasattr(G, "MOL_rxn_center"):
+      from torch_geometric.utils import to_dense_batch
+      center_flag = G.MOL_rxn_center.to(self.device).long()
+      center_dense, _ = to_dense_batch(center_flag, graph_batch)   # (B, A)
+      center_emb = self.rxn_center_emb(center_dense)               # (B, A, D)
+      m = atom_mask.unsqueeze(-1).float()                          # (B, A, 1)
+
+  If atom_mask is None and use_rxn_center=True and hasattr(G, "MOL_rxn_center")
+  , then atom_mask.unsqueeze(-1) will crash with AttributeError: 'NoneType' obj
+  ect has no attribute 'unsqueeze'. But can atom_mask be None when self.use_rxn
+  _center=True and hasattr(G, "MOL_rxn_center")?
+
+  • atom_mask is None only if G.MOL_graph_x is None (early return) OR if self.s
+    strate_gnn returns None for atom_mask.
+  • If G.MOL_graph_x is None, the method returns early before reaching the rxn_
+    nter code.
+  • self.substrate_gnn always returns a valid atom_mask (from to_dense_batch).
+  • So atom_mask cannot be None at that point. The condition hasattr(G, "MOL_rx
+    center") doesn't bypass the early return.
+  • However, if someone sets use_rxn_center=True but the dataloader doesn't pro
+    de MOL_graph_x (impossible in normal training since substrate is required),
+    r if substrate_gnn is modified to return None... This is defensive coding,
+    t not a bug in the current diff.
+
+  Actually, wait. Is there a case where G.MOL_graph_x is not None but atom_mask
+  is None? Looking at substrate_gnn.py, to_dense_batch returns (tensor, mask) w
+  here mask is a BoolTensor. So atom_mask is always a tensor. Not None.
+
+  So there are no bugs to report regarding the specific questions asked.
+
+  But I should also check if the diff introduces any other cross-file consisten
+  cy bugs.
+
+  Wait! I need to check if v4_ultimate.py forward calls self.head_int3d when us
+  e_int3d=True but the int3d block is skipped because pocket_tokens is None or
+  atom_tokens is None.
+
+  • In that case, y_int3d = torch.zeros(B, 1, device=self.device). Fine.
+  • But then later _log_diag logs y_int3d_abs on zeros. Fine.
+
+  Wait, _log_diag is called regardless of whether use_int3d etc are True. It lo
+  gs all six branch magnitudes. That's fine.
+
+  Another thing: g_struct uses pocket_mask to compute n_res. But pocket_mask is
+  not dropped. So even when keep_pocket=0, n_res is still computed from real po
+  cket. Is this intentional?
+
+  • The comment says "The same survival mask is applied to (a) the pooled embed
+    ng used by gates and (b) the final y_* contribution". It doesn't say masks
+    e dropped. So n_res from real pocket mask is fine.
+
+  Is there a bug where pocket_pool is zeroed but pocket_tokens is not, causing
+  int3d to compute non-zero p_pool_int even for dropped samples, wasting comput
+  e?
+
+  • This is a performance issue, not a correctness bug. The output is zeroed af
+    rwards. Not a bug.
+
+  Wait, I should check data_module.py for modality_dropout or any new keys that
+  need __inc__ declaration.
+
+  • The BRIEF mentions: "Any new key added to the model must also be declared i
+    __inc__ / follow_batch lists, or PyG will try to shift it as an edge-index-
+    ke tensor."
+  • modality_dropout is not a data key; it's a model config key. It doesn't aff
+    t the data module.
+  • The NAC-related tensors (pocket_cat, rxn_center_dense) are created inside t
+    model, not in the data module.
+  • The data module might need to provide MOL_rxn_center — but that's already p
+    vided by the existing pipeline (script 18 precomputes it).
+  • Are there any NEW data keys introduced? No.
+
+  Wait, what about G.ANNOT_has_any and G.ANNOT_has_cof?
+
+  • These are used in _log_diag and g_struct. They were already used in v4_pock
+    . The data module must already provide them. Not new.
+
+  So after thorough analysis, I find no bugs in the areas the user asked about.
+
+  Wait, let me reconsider one thing. The user asked specifically: "Are there do
+  wnstream files (training driver, data loader, other models) that break becaus
+  e _encode_pocket and _encode_substrate now return different arities?"
+
+  I checked v4_pocket, v4_innovate, v4_minimal. They define their own methods.
+  But what about:
+
+  • Any unit tests?
+  • Any training driver that does from v4_ultimate import V4Ultimate and monkey
+    atches or inherits?
+  • Any Jupyter notebook?
+
+  Let me search for _encode_pocket and _encode_substrate more broadly.
+• Used Grep (_encode_pocket|_encode_substrate)
+• Used Grep (v4_ultimate)
+• The search confirms no other files call _encode_pocket or _encode_substrate f
+  rom v4_ultimate.py. Each model file defines its own private methods.
+
+  Now, let me think if there's any actual bug I should report. The user asked f
+  or bugs only, terse, no preamble. If I find no bugs, I should say so plainly.
+
+  But wait, let me look at one more thing: the v4_ultimate.py _encode_pocket us
+  es node_s[:, cat_idx] where cat_idx includes indices like 1, 3, 4, 6, 8, 11,
+  15, 18. The comment says these correspond to STANDARD_AA order: 1=ARG, 3=ASP,
+  4=CYS, 6=GLU, 8=HIS, 11=LYS, 15=SER, 18=TYR. Let me verify this against scrip
+  ts/14_extract_pockets.py.
+
+  Actually, the brief says: "cols 0..19 = AA one-hot (STANDARD_AA order in scri
+  pts/14_extract_pockets.py)"
+
+  I should verify what STANDARD_AA order is in that script.
+• Used Grep (STANDARD_AA)
+• Let me read the STANDARD_AA list to verify indices.
+• Used ReadFile (scripts/14_extract_pockets.py)
+• Now let me verify the indices:
+
+  • 0: ALA
+  • 1: ARG (R)
+  • 2: ASN
+  • 3: ASP (D)
+  • 4: CYS (C)
+  • 5: GLN
+  • 6: GLU (E)
+  • 7: GLY
+  • 8: HIS (H)
+  • 9: ILE
+  • 10: LEU
+  • 11: LYS (K)
+  • 12: MET
+  • 13: PHE
+  • 14: PRO
+  • 15: SER (S)
+  • 16: THR
+  • 17: TRP
+  • 18: TYR (Y)
+  • 19: VAL
+
+  The indices in _CATALYTIC_AA_IDX = (1, 3, 4, 6, 8, 11, 15, 18) correspond to:
+
+  • 1: ARG
+  • 3: ASP
+  • 4: CYS
+  • 6: GLU
+  • 8: HIS
+  • 11: LYS
+  • 15: SER
+  • 18: TYR
+
+  These match the comment in the code. So that's correct.
+
+  Now, is there any actual bug? Let me think harder.
+
+  Potential bug in _encode_pocket: node_s[:, 21] + node_s[:, 22] when node_s ha
+  s shape (N, 26).
+
+  • Column 21 = is_active_site
+  • Column 22 = is_binding_site These are 0/1. Sum is clamped to max 1.0. Fine.
+
+  Potential bug: pocket_cat is computed as torch.maximum(is_annot, 0.5 * is_aa)
+  .
+
+  • is_annot is float.
+  • is_aa is float.
+  • 0.5 * is_aa is float.
+  • torch.maximum works. Fine.
+
+  Potential bug: cat_dense might have values outside [0,1]?
+
+  • is_annot is clamped to [0,1].
+  • is_aa is clamped to [0,1].
+  • 0.5 * is_aa is in [0, 0.5].
+  • torch.maximum(is_annot, 0.5 * is_aa) is in [0,1].
+  • Fine.
+
+  Wait, is there a shape mismatch in _log_diag when logging G.ANNOT_has_any.flo
+  at().mean()?
+
+  • G.ANNOT_has_any could be shape (B,) bool. .float() gives (B,) float. .mean(
+    gives scalar. Fine.
+
+  Wait, what about cov_mol_xyz?
+
+  if hasattr(G, "MOL_graph_xyz_valid"):
+      _log("cov_mol_xyz", G.MOL_graph_xyz_valid.float().mean())
+
+  G.MOL_graph_xyz_valid is likely (B,) bool. .mean() gives scalar. Fine.
+
+  Is there a bug where _log_diag uses torch.tensor(has_rxn, device=self.device)
+  but has_rxn is a Python float, creating a 0-dim tensor?
+
+  • Yes, torch.tensor(1.0, device=self.device) is a 0-dim tensor. self.log shou
+    accept it. PyTorch Lightning's self.log accepts tensors and scalars. Fine.
+
+  Actually, I recall that in some versions of Lightning, logging a 0-dim tensor
+  works fine.
+
+  Wait, is there a bug in _log_diag calling _log("cov_rxn_drfp", torch.tensor(h
+  as_rxn, device=self.device)) inside a method that might be called during dist
+  ributed training?
+
+  • self.log(..., sync_dist=True) handles distributed sync. Fine.
+
+  Let me reconsider the ablation configs and modality_dropout. The ablation con
+  figs (A0-A8) generated by 26_generate_ablation_configs.py do NOT contain moda
+  lity_dropout. Since the base config v4_ultimate.yml does have it, and the gen
+  erator does copy.deepcopy(base), the ablation configs SHOULD have it. But the
+  diff shows they don't.
+
+  Wait, looking at the diff more carefully: the ablation configs are shown star
+  ting from line 162 (A0) through line 1178 (A8). Each is exactly 107 lines. Th
+  e base config v4_ultimate.yml modification is shown at line 1179+. The ablati
+  on configs were generated by the script shown at line 1198+.
+
+  Could the ablation configs have been generated from an OLD version of the bas
+  e config (before modality_dropout was added), and then config/v4_ultimate.yml
+  was modified later in the same diff? Yes, that's possible. In that case, the
+  ablation configs are missing modality_dropout. But as I reasoned earlier, thi
+  s means ablation runs will have NO modality dropout, which is actually safer
+  for ablation studies. It's not a bug.
+
+  However, there's a subtle issue: the 26_generate_ablation_configs.py script u
+  ses copy.deepcopy(base) and only overrides use_* flags. If someone regenerate
+  s the ablation configs after modality_dropout is in the base, they WILL inher
+  it it. The current ablation configs in the diff don't have it, but that's bec
+  ause they were generated before. If the intent is that ablation configs shoul
+  d explicitly set modality_dropout to all zeros, the script doesn't do that. B
+  ut this is a very minor issue and arguably not a bug.
+
+  Is there any cross-file issue with _encode_pocket and _encode_substrate retur
+  n values in v4_ultimate.py itself? In forward:
+
+  atom_tokens, graph_emb, atom_mask, rxn_center_dense = \
+      self._encode_substrate(G, B)
+  pocket_tokens, pocket_pool, pocket_mask, pocket_xyz, pocket_cat = \
+      self._encode_pocket(G, B)
+
+  This matches the new arities. Fine.
+
+  Wait, I need to check if v4_ultimate.py _encode_pocket returns pocket_xyz as
+  None when use_pocket=False, and then pocket_xyz is used in _log_diag?
+
+  • _log_diag doesn't use pocket_xyz. Fine.
+
+  Wait, what about _encode_pocket when use_pocket=True but pocket_gvp returns p
+  _mask as a float mask instead of bool?
+
+  • to_dense_batch in pocket_gvp (actually in gvp_pocket.py) might return float
+    ask. Let me check.
+
+  Actually, pocket_gvp is in gvp_pocket.py. Let me see what it returns.
+• Used ReadFile (src/model/gvp_pocket.py)
+• Let me read more of gvp_pocket.py to see the return values.
+• Used Grep (return.*p_tokens|return.*p_pool|return.*p_mask)
+• Let me search for the forward method return in gvp_pocket.py.
+• Used Grep (def forward)
+• Looking at gvp_pocket.py line 185: pocket_tokens, pocket_mask = to_dense_batc
+  h(s, batch). to_dense_batch returns a bool mask. So pocket_mask is bool. Fine
+  .
+
+  Now let me check line 193: return statement.
+• Used ReadFile (src/model/gvp_pocket.py)
+• So pocket_mask is bool from to_dense_batch. Fine.
+
+  Let me now consider if there are any other bugs.
+
+  Actually, wait. I see a potential issue in v4_ultimate.py _encode_substrate:
+
+  rxn_center_dense = None
+  if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
+      from torch_geometric.utils import to_dense_batch
+      center_flag_long = G.MOL_rxn_center.to(self.device).long()
+      rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
+                                           graph_batch)            # (B, A)
+
+  If G.MOL_rxn_center is provided but graph_batch doesn't match center_flag_lon
+  g in size (e.g., if MOL_rxn_center is per-graph rather than per-node), to_den
+  se_batch could fail or produce wrong shapes. But MOL_rxn_center should be per
+  -atom (same as x), so same size as graph_batch. The data pipeline produces it
+  that way.
+
+  Let me verify by looking at script 18.
+• Used ReadFile (scripts/18_precompute_rxnmapper.py)
+• The rxn_center mask is per-atom, aligned with RDKit atom ordering. The data m
+  odule should attach it per-graph. So to_dense_batch(center_flag_long, graph_b
+  atch) is correct.
+
+  I think I have exhausted all avenues. There are no bugs to report in the spec
+  ific areas asked. Let me write a concise report.
+
+  Wait, one last thing. The user asked: "Are there downstream files (training d
+  river, data loader, other models) that break because _encode_pocket and _enco
+  de_substrate now return different arities?"
+
+  I should explicitly answer: No. v4_pocket.py, v4_innovate.py, v4_minimal.py e
+  ach define their own private methods with their own arities; none import or c
+  all v4_ultimate's encoders.
+
+  Also, modality_dropout config key: read correctly via self.config["model"].ge
+  t("modality_dropout", {}) or {}.
+
+  And p_nac/a_nac kwargs: int3d_cross_attn.py defines them as optional with def
+  aults None; v4_ultimate.py passes p_nac=pocket_cat, a_nac=rxn_center_dense on
+  ly inside the use_int3d block. Shapes match: pocket_cat is (B, K), rxn_center
+  _dense is (B, A).
+
+  So my final answer should be: No bugs found in these specific cross-file cons
+  istency checks.
+• No bugs found in the cross-file consistency checks you asked about.
+  • p_nac / a_nac kwargs: int3d_cross_attn.py declares them as Optional[torch.T
+    sor] = None; v4_ultimate.py passes p_nac=pocket_cat ((B,K)) and a_nac=rxn_c
+    ter_dense ((B,A)) inside the use_int3d block. Shapes and optionality match.
+  • modality_dropout config: Read correctly at self.config["model"].get("modali
+    _dropout", {}) or {} in v4_ultimate.py forward. The ablation configs omit t
+    key (inherited as empty dict → no dropout), which is safe.
+  • Downstream arity breakage: None. v4_pocket.py, v4_innovate.py, and v4_minim
+    .py each define their own private _encode_pocket / _encode_substrate method
+    none call v4_ultimate's versions. v4_pocket.py and v4_innovate.py invoke In
+    DCrossAttn without the new kwargs, which is backward-compatible because the
+    arameters default to None.

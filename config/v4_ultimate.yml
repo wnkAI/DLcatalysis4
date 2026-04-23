@@ -46,6 +46,7 @@ model:
   rank_min_diff_substrate: 0.1
 
   # Feature flags — all ON for ultimate; flip off for ablation
+  use_substrate: true
   use_rxn_drfp: true
   use_rxn_center: true
   use_pocket: true

@@ -77,6 +77,7 @@ class V4Ultimate(pl.LightningModule):
         self.results_file = os.path.join(self.log_dir, f"{model_name}_{self.run_id}.csv")
 
         # Feature flags
+        self.use_substrate  = config["model"].get("use_substrate", True)
         self.use_rxn_drfp   = config["model"].get("use_rxn_drfp", True)
         self.use_rxn_center = config["model"].get("use_rxn_center", True)
         self.use_pocket     = config["model"].get("use_pocket", True)
@@ -111,14 +112,17 @@ class V4Ultimate(pl.LightningModule):
         )
 
         # ── Substrate GINE (optionally adds RXNMapper center flag as extra atom feat) ──
-        gnn_cfg = config["model"].get("substrate_gnn", {})
-        self.substrate_gnn = SubstrateGINE(
-            hidden_dim=self.hidden_dim,
-            n_layers=gnn_cfg.get("n_layers", 4),
-            dropout=gnn_cfg.get("dropout", 0.1),
-        )
-        # RXNMapper center flag: if enabled, add a projection + add to GINE atom embeds
-        if self.use_rxn_center:
+        if self.use_substrate:
+            gnn_cfg = config["model"].get("substrate_gnn", {})
+            self.substrate_gnn = SubstrateGINE(
+                hidden_dim=self.hidden_dim,
+                n_layers=gnn_cfg.get("n_layers", 4),
+                dropout=gnn_cfg.get("dropout", 0.1),
+            )
+        # RXNMapper center flag: if enabled, add a projection + add to GINE atom embeds.
+        # The center embedding is only useful when substrate GINE runs; if substrate
+        # is disabled the embedding is never consumed.
+        if self.use_rxn_center and self.use_substrate:
             # Input: 1-dim boolean mask → small embedding added to atom tokens post-GINE
             self.rxn_center_emb = nn.Embedding(2, self.hidden_dim)
 
@@ -208,7 +212,8 @@ class V4Ultimate(pl.LightningModule):
                        hidden_dim=hdr["hidden_dim"], num_layer=hdr["num_layers"],
                        norm=hdr["norm_fn"], act_fn=hdr["act_fn"], dropout=self.dropout_rate)
         self.head_seq    = _mkhead(self.hidden_dim)
-        self.head_sub    = _mkhead(self.hidden_dim)
+        if self.use_substrate:
+            self.head_sub    = _mkhead(self.hidden_dim)
         if self.use_rxn_drfp:
             self.head_rxn    = _mkhead(self.hidden_dim)
         if self.use_int3d:
@@ -296,7 +301,11 @@ class V4Ultimate(pl.LightningModule):
         return feat, pooled, seq_mask
 
     def _encode_substrate(self, G, B):
-        if not hasattr(G, "MOL_graph_x") or G.MOL_graph_x is None:
+        # Substrate branch can be fully disabled for A0 (seq-only) ablation:
+        # no GINE forward, no parameters updated, returns zero embed.
+        if (not self.use_substrate
+                or not hasattr(G, "MOL_graph_x")
+                or G.MOL_graph_x is None):
             z = torch.zeros(B, self.hidden_dim, device=self.device)
             return None, z, None, None
         num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
@@ -311,18 +320,21 @@ class V4Ultimate(pl.LightningModule):
         )
         # Reaction-center dense flag, kept around for the NAC bias in int3d
         # even when `use_rxn_center` (the atom-token injection) is disabled.
+        # We compute the dense layout once here as float and reuse the long
+        # cast for the Embedding lookup below.
         rxn_center_dense = None
         if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
             from torch_geometric.utils import to_dense_batch
             center_flag_long = G.MOL_rxn_center.to(self.device).long()
             rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
-                                                 graph_batch)            # (B, A)
-        # Add RXNMapper center flag to atom tokens (if enabled)
-        if self.use_rxn_center and hasattr(G, "MOL_rxn_center"):
-            from torch_geometric.utils import to_dense_batch
-            center_flag = G.MOL_rxn_center.to(self.device).long()
-            center_dense, _ = to_dense_batch(center_flag, graph_batch)   # (B, A)
-            center_emb = self.rxn_center_emb(center_dense)               # (B, A, D)
+                                                 graph_batch)            # (B, A) float
+        # Add RXNMapper center flag to atom tokens (if enabled). Reuses the
+        # already-computed dense layout instead of calling to_dense_batch
+        # a second time.
+        if (self.use_rxn_center and self.use_substrate
+                and rxn_center_dense is not None):
+            center_dense_long = rxn_center_dense.long()                  # (B, A) long
+            center_emb = self.rxn_center_emb(center_dense_long)          # (B, A, D)
             m = atom_mask.unsqueeze(-1).float()                          # (B, A, 1)
             # Atom-level: add only where atom is valid
             atom_tokens = atom_tokens + center_emb * m
@@ -352,6 +364,14 @@ class V4Ultimate(pl.LightningModule):
                     torch.zeros(B, self.hidden_dim, device=self.device),
                     None, None, None)
         node_s = G.POCKET_node_s.to(self.device).float()
+        # Column layout (backbone_features_v2): [0..19] AA one-hot, 20 pLDDT,
+        # 21 is_active_site, 22 is_binding_site, 23 is_cofactor_contact,
+        # 24 is_metal_contact, 25 min_dist_to_substrate/10. We index up to 22
+        # for the catalytic soft-indicator below, so guard against schema drift.
+        assert node_s.shape[-1] >= 23, (
+            f"pocket node_s width {node_s.shape[-1]} < 23 — did the pocket "
+            f"feature schema change? Expected backbone_features_v2 layout."
+        )
         node_v = G.POCKET_node_v.to(self.device).float()
         edge_index = G.POCKET_edge_index.to(self.device).long()
         edge_s = G.POCKET_edge_s.to(self.device).float()
@@ -447,29 +467,44 @@ class V4Ultimate(pl.LightningModule):
         enz_fused = enz_pool + cond_emb
 
         # ── Modality dropout ──
-        # During training, drop each auxiliary modality with a config-level
-        # probability per sample. The same survival mask is applied to (a) the
-        # pooled embedding used by gates and (b) the final y_* contribution,
-        # so "dropped" truly means the branch contributes zero for that
-        # sample. Inference always keeps all modalities — dropout only
-        # regularizes training. This lets us ablate modalities at test time
-        # (e.g. inference without pocket) without retraining from scratch.
+        # Per-sample Bernoulli dropout of rxn / pocket / annot branches
+        # during training only. Uses *inverted scaling*: the survival mask
+        # is divided by (1 - p) so E[keep * x] == x, matching standard
+        # dropout semantics and keeping train/test distributions aligned.
+        # The same mask is applied in three places so "dropped" truly means
+        # the branch contributes zero for that sample AND the encoder for
+        # that branch receives no gradient through the predictor:
+        #   (a) pooled embedding used by gates (embed-level)
+        #   (b) token tensors consumed by cross-attention (token-level)
+        #   (c) final y_* contribution (output-level)
         md = self.config["model"].get("modality_dropout", {}) or {}
         def _keep(p):
             if (not self.training) or p <= 0.0:
                 return torch.ones(B, 1, device=self.device)
-            return (torch.rand(B, 1, device=self.device) >= float(p)).float()
+            q = 1.0 - float(p)
+            mask = (torch.rand(B, 1, device=self.device) >= float(p)).float()
+            return mask / max(q, 1e-6)
         keep_rxn    = _keep(md.get("rxn",    0.0))
         keep_pocket = _keep(md.get("pocket", 0.0))
         keep_annot  = _keep(md.get("annot",  0.0))
-        rxn_emb    = rxn_emb    * keep_rxn
+        # Embed-level: gates can't see a dropped modality
+        rxn_emb     = rxn_emb     * keep_rxn
         pocket_pool = pocket_pool * keep_pocket
-        annot_emb  = annot_emb  * keep_annot
+        annot_emb   = annot_emb   * keep_annot
+        # Token-level: zero pocket_tokens so the int3d cross-attn cannot
+        # leak gradient to the pocket GVP for dropped samples. Shape
+        # (B, K, D) is broadcast against (B, 1) → (B, 1, 1).
+        if pocket_tokens is not None:
+            pocket_tokens = pocket_tokens * keep_pocket.unsqueeze(-1)
 
         # ── Branches ──
         y_seq = self.head_seq(enz_fused)
-        y_sub = self.head_sub(graph_emb)
-        y_rxn = self.head_rxn(rxn_emb) if self.use_rxn_drfp else torch.zeros(B, 1, device=self.device)
+        y_sub = (self.head_sub(graph_emb)
+                 if self.use_substrate
+                 else torch.zeros(B, 1, device=self.device))
+        y_rxn = (self.head_rxn(rxn_emb)
+                 if self.use_rxn_drfp
+                 else torch.zeros(B, 1, device=self.device))
 
         # int3d
         if self.use_int3d and pocket_tokens is not None and atom_tokens is not None and pocket_mask is not None:
@@ -497,7 +532,20 @@ class V4Ultimate(pl.LightningModule):
         y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens is not None else torch.zeros(B, 1, device=self.device)
         y_annot  = self.head_annot(annot_emb)  if self.use_annot  else torch.zeros(B, 1, device=self.device)
 
-        # Modality dropout at output level. Heads on zeroed embeddings still
+        # Snapshot pre-output-dropout branch values for diagnostics. The
+        # output-level dropout below zeroes samples on y_rxn / y_struct /
+        # y_int3d / y_annot; logging *before* that gives a clean read on
+        # which branch actually carries signal.
+        y_pre = {
+            "y_seq":    y_seq.detach(),
+            "y_sub":    y_sub.detach(),
+            "y_rxn":    y_rxn.detach(),
+            "y_int3d":  y_int3d.detach(),
+            "y_struct": y_struct.detach(),
+            "y_annot":  y_annot.detach(),
+        }
+
+        # Output-level modality dropout. Heads on zeroed embeddings still
         # emit the head bias term, so we explicitly zero the y_* contribution
         # for dropped samples. keep_* is all-ones during inference (see
         # _keep), so eval metrics are unaffected.
@@ -553,14 +601,13 @@ class V4Ultimate(pl.LightningModule):
             self._last_log_var = None
 
         # ── Diagnostics ──
-        # Emits branch magnitudes, gate means, and modality coverage once a
-        # trainer is attached. Guarded so the model still runs standalone
-        # (unit tests / scripted inference) without a Lightning trainer.
+        # Uses *pre-output-dropout* branch values (y_pre) so magnitudes
+        # are not deflated by the dropout probability. Guarded so the
+        # model still runs standalone (unit tests / scripted inference)
+        # without a Lightning trainer.
         if getattr(self, "_trainer", None) is not None:
             self._log_diag(
-                B=B, G=G,
-                y_seq=y_seq, y_sub=y_sub, y_rxn=y_rxn,
-                y_int3d=y_int3d, y_struct=y_struct, y_annot=y_annot,
+                B=B, G=G, y_pre=y_pre,
                 g_pair=g_pair, g_struct=g_struct, g_annot=g_annot,
                 atom_mask=atom_mask, pocket_mask=pocket_mask,
             )
@@ -570,8 +617,7 @@ class V4Ultimate(pl.LightningModule):
     # ──────────────────────────────────────────────────────────────
     # Diagnostics
     # ──────────────────────────────────────────────────────────────
-    def _log_diag(self, *, B, G,
-                  y_seq, y_sub, y_rxn, y_int3d, y_struct, y_annot,
+    def _log_diag(self, *, B, G, y_pre,
                   g_pair, g_struct, g_annot,
                   atom_mask, pocket_mask):
         def _log(name, value):
@@ -579,33 +625,48 @@ class V4Ultimate(pl.LightningModule):
                      on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=B)
 
-        # Branch magnitudes (mean |y_*|) — tells you which branch dominates pred
-        _log("y_seq_abs",    y_seq.detach().abs().mean())
-        _log("y_sub_abs",    y_sub.detach().abs().mean())
-        _log("y_rxn_abs",    y_rxn.detach().abs().mean())
-        _log("y_int3d_abs",  y_int3d.detach().abs().mean())
-        _log("y_struct_abs", y_struct.detach().abs().mean())
-        _log("y_annot_abs",  y_annot.detach().abs().mean())
+        # Branch magnitudes (mean |y_*|) on the PRE-dropout branch outputs,
+        # so the "which branch dominates" read is not confounded with the
+        # modality-dropout survival probability.
+        for name, t in y_pre.items():
+            _log(f"{name}_abs", t.abs().mean())
 
         # Gate means — tells you how much each branch is actually mixed in
         _log("g_pair_mean",   g_pair.detach().mean())
         _log("g_struct_mean", g_struct.detach().mean())
         _log("g_annot_mean",  g_annot.detach().mean())
 
-        # Modality coverage (fraction of the batch with real signal)
-        has_rxn = float(hasattr(G, "RXN_drfp"))
-        has_atoms = float(atom_mask.any().item()) if atom_mask is not None else 0.0
-        has_pocket = float(pocket_mask.any().item()) if pocket_mask is not None else 0.0
-        _log("cov_rxn_drfp", torch.tensor(has_rxn, device=self.device))
-        _log("cov_atoms",    torch.tensor(has_atoms, device=self.device))
-        _log("cov_pocket",   torch.tensor(has_pocket, device=self.device))
+        # Per-sample modality coverage. `mask.any(dim=1).float().mean()`
+        # gives the fraction of samples in the batch that have at least one
+        # valid entry for that modality. `getattr(..., None) is not None`
+        # is used instead of `hasattr` because upstream code sometimes
+        # sets attributes to None rather than omitting them — a raw
+        # `hasattr` would pass through and `.float()` would crash.
+        if atom_mask is not None:
+            _log("cov_atoms", atom_mask.any(dim=1).float().mean())
+        if pocket_mask is not None:
+            _log("cov_pocket", pocket_mask.any(dim=1).float().mean())
 
-        if hasattr(G, "ANNOT_has_any"):
-            _log("cov_annot", G.ANNOT_has_any.float().mean())
-        if hasattr(G, "ANNOT_has_cof"):
-            _log("cov_cof", G.ANNOT_has_cof.float().mean())
-        if hasattr(G, "MOL_graph_xyz_valid"):
-            _log("cov_mol_xyz", G.MOL_graph_xyz_valid.float().mean())
+        # RXN DRFP: prefer a dataloader-supplied per-sample validity flag;
+        # fall back to "non-zero fingerprint = valid" on the raw tensor.
+        rxn_valid = getattr(G, "RXN_drfp_valid", None)
+        if rxn_valid is not None:
+            _log("cov_rxn_drfp", rxn_valid.float().mean())
+        else:
+            drfp = getattr(G, "RXN_drfp", None)
+            if drfp is not None:
+                _log("cov_rxn_drfp",
+                     (drfp.view(B, -1).abs().sum(dim=-1) > 0).float().mean())
+
+        annot_any = getattr(G, "ANNOT_has_any", None)
+        if annot_any is not None:
+            _log("cov_annot", annot_any.float().mean())
+        annot_cof = getattr(G, "ANNOT_has_cof", None)
+        if annot_cof is not None:
+            _log("cov_cof", annot_cof.float().mean())
+        mol_xyz_valid = getattr(G, "MOL_graph_xyz_valid", None)
+        if mol_xyz_valid is not None:
+            _log("cov_mol_xyz", mol_xyz_valid.float().mean())
 
     # ──────────────────────────────────────────────────────────────
     # Loss / metrics / steps — identical machinery as v4_pocket

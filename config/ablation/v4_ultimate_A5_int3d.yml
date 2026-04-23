@@ -31,6 +31,7 @@ model:
   rank_max_pairs_substrate: 16
   rank_min_diff_enzyme: 0.1
   rank_min_diff_substrate: 0.1
+  use_substrate: true
   use_rxn_drfp: true
   use_rxn_center: true
   use_pocket: true
@@ -38,6 +39,10 @@ model:
   use_annot: false
   use_condition: false
   use_ec: false
+  modality_dropout:
+    rxn: 0.15
+    pocket: 0.15
+    annot: 0.15
   seq_module:
     seq_hidden_dim: 512
   substrate_gnn:

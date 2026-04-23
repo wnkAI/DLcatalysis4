@@ -59,8 +59,12 @@ class Int3DCrossAttnLayer(nn.Module):
         # Near-attack conformation (NAC) bias: per-head learnable gain
         # applied to the outer product of (catalytic residue indicator) ×
         # (reaction-center atom indicator). Init at zero so behavior matches
-        # prior checkpoints unless the model learns to turn it on.
+        # prior checkpoints unless the model learns to turn it on. The
+        # effective gain is `tanh(nac_gain) * nac_max`, bounding the bias
+        # in [-nac_max, nac_max] so softmax cannot collapse even if the raw
+        # parameter drifts large.
         self.nac_gain = nn.Parameter(torch.zeros(n_heads))
+        self.nac_max = 3.0
 
         self.p_out = nn.Linear(hidden_dim, hidden_dim)
         self.a_out = nn.Linear(hidden_dim, hidden_dim)
@@ -132,8 +136,9 @@ class Int3DCrossAttnLayer(nn.Module):
         if p_nac is not None and a_nac is not None:
             nac_outer = (p_nac.float().unsqueeze(-1)
                          * a_nac.float().unsqueeze(-2))          # (B, K, A)
+            gain = self.nac_gain.tanh() * self.nac_max            # bounded per-head
             nac_bias = (nac_outer.unsqueeze(1)
-                        * self.nac_gain.view(1, -1, 1, 1))       # (B, H, K, A)
+                        * gain.view(1, -1, 1, 1))                 # (B, H, K, A)
             bias = nac_bias if bias is None else (bias + nac_bias)
 
         # Pocket ← atom (Q from pocket, K/V from atom)

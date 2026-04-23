@@ -1,0 +1,1586 @@
+diff --git a/REVIEWS/AUDIT_PERFILE.md b/REVIEWS/AUDIT_PERFILE.md
+new file mode 100644
+index 0000000..c15291a
+--- /dev/null
++++ b/REVIEWS/AUDIT_PERFILE.md
+@@ -0,0 +1,155 @@
++# DLcatalysis 4.0 — Per-file audit
++
++Date: 2026-04-23
++Commit at audit: `3309c17` + follow-up B1/B2 patches.
++Scope: every file under `src/` and `scripts/` touched by the v4 work.
++Each entry: **purpose / invariants / known risks / status**.
++
++Status legend:
++- `OK`       — read, cross-checked, no open issues
++- `WATCH`    — works but fragile or under-tested, listed risks stand
++- `TODO`     — logic gap acknowledged; tracked below
++- `STUB`     — not yet used in training; safe to ignore for v4 run
++
++---
++
++## src/model/
++
++### v4_ultimate.py (status: WATCH)
++- **Purpose.** 6-branch residual: seq + gate_pair·(sub+rxn+int3d) + gate_struct·struct + gate_annot·annot.
++- **Invariants.**
++  - `pair_delta = y_sub + y_rxn + y_int3d`; branches disabled via flags return zero-tensors, so the sum is safe.
++  - `graph_emb` picks up rxn-center contribution via mask-weighted mean (no padding bias).
++  - `gate_struct` bias is read from `struct.gate_init_bias` and applied twice (in `__init__` body + after `_init_weights`) so Xavier re-init cannot wipe it.
++  - `use_uncertainty` path now respects `loss_type`: per-sample loss is built from the configured loss first, then aleatoric-weighted.
++  - `_log_diag` is guarded by `self._trainer is not None` so forward() still runs in scripted inference.
++- **Risks.**
++  - `y_int3d` head has input dim `hidden_dim * 2`; if int3d is off the head is never built — check training scripts don't index `self.head_int3d`.
++  - `g_annot` bias init is `-1.0`; if annotation coverage is low, the gate may saturate closed and annotation branch won't train — diagnostics (`diag/g_annot_mean`, `diag/cov_annot`) are there precisely to catch this.
++- **Status.** B1 diagnostics added. Needs a smoke run before claiming green.
++
++### v4_pocket.py (status: OK)
++- **Purpose.** 4-branch (seq + sub + rxn + pocket) model — predecessor to v4_ultimate, still used as fallback config.
++- **Invariants.** `has_annot`/`has_cof` now read real fields via `_pull()` (commit 3309c17); no longer stubbed zeros.
++- **Risks.** None known. Shares pocket/rxn encoders with v4_ultimate.
++- **Status.** OK after fix.
++
++### v4_innovate.py (status: STUB)
++- **Purpose.** Novelty-focused 3-head multi-task model (kcat / Km / kcat/Km) with physical consistency loss.
++- **Risks.** Not yet wired into training driver; no experiment has run end-to-end.
++- **Status.** Kept for paper's "novelty" path; not on the critical run for the first submission.
++
++### v4_minimal.py (status: OK)
++- **Purpose.** 3.0-equivalent seq + sub baseline, kept for reproducing 3.0 numbers.
++- **Status.** Unchanged by 4.0 work.
++
++### gvp_pocket.py (status: OK)
++- **Purpose.** GVP-GNN pocket encoder; returns `(tokens, pool, mask)`.
++- **Invariants.** `in_s_dim=26` matches `backbone_features_v2`; `in_v_dim=2` covers (CA→N, CA→C) unit vectors.
++- **Status.** Unchanged; consumed by v4_pocket and v4_ultimate.
++
++### int3d_cross_attn.py (status: WATCH)
++- **Purpose.** Cross-attention between pocket residues and substrate atoms with RBF-distance bias.
++- **Risks.** Silently falls back when 3D coords are invalid per-sample (`xyz_valid_per_sample`). The `diag/cov_mol_xyz` stream (B1) exposes coverage so we can see if the 3D channel is in fact running.
++- **Status.** WATCH until first run confirms coverage > 0.
++
++### substrate_gnn.py (status: OK)
++- **Purpose.** GINE substrate encoder; outputs per-atom tokens + graph pool + atom mask.
++- **Status.** Unchanged.
++
++### ec_cross_attn.py (status: STUB)
++- **Purpose.** EnzymeCAGE-style cross-attention + pocket-weight module, imported for v4_innovate.
++- **Status.** Not on v4_ultimate path.
++
++### module.py (status: OK)
++- **Purpose.** Small MLP / pool utility.
++- **Status.** Unchanged.
++
++---
++
++## scripts/ (data & training)
++
++### 00..05 (SMILES recovery + dataset integration) (status: OK)
++Run-once ETL. `05_integrate_final_dataset.py` produces the master CSV that downstream scripts key on. Not exercised in v4 work besides dataset consumption.
++
++### 10_prepare_model_inputs.py / 11_precompute_mol_graphs.py (status: OK)
++- Produces `mol_graphs.pt` keyed by `smi_id`; graph dicts include `x`, `edge_index`, `edge_attr`, `num_nodes`, optional `xyz` + `xyz_valid`.
++- **Risk.** Downstream code assumes `xyz_valid` is a bool per-sample; verified by v4_ultimate before use.
++
++### 12_precompute_prot5_lmdb.py (status: OK)
++- Writes ProtT5 embeddings into LMDB keyed by `seq_id`.
++
++### 13_make_cv_splits.py (status: OK)
++- Produces `train/valid/test_fold{k}.csv`.
++
++### 14_extract_pockets.py (status: WATCH)
++- **Purpose.** Extract K=32 pocket residues within 8 Å of docked pose (EnzymeCAGE-exact).
++- **Invariants.** `backbone_features_v2` produces `node_s.shape == (K, 26)`; pipeline pads to K when fewer residues found.
++- **Risks.** Pocket source tagging (`docked_pose` vs fallback) is used by 25's fallback-rate check — any new fallback path must set `pocket_source` explicitly.
++- **Status.** WATCH until 25 validates.
++
++### 15_build_structure_manifest.py / 16_fetch_alphafold.py (status: OK)
++Structure prep; unchanged by v4 review.
++
++### 17_precompute_drfp.py (status: OK)
++- Writes `rxn_drfp.npy` aligned to `rxn_drfp_keys.csv`.
++
++### 18_precompute_rxnmapper.py (status: OK)
++- Writes per-substrate reacting-center atom mask `rxn_center_mask.pt`.
++
++### 20_run_vina_gpu.py (status: WATCH)
++- **Purpose.** QVina2 / Vina-GPU driver per pair.
++- **Invariants.** Per-pair seed = `hash(global_seed:uid:smi_id)`, exhaustiveness=8.
++- **Risks.** QVina2 timeout fallback; any silent failure must emit `run_status` row so 25 catches the coverage hit.
++- **Status.** WATCH pending full pair-run results.
++
++### 21_parse_annotations.py (status: OK)
++- Ingests InterPro / Pfam / GO into `enzyme_annotations.pt` + vocab JSON.
++
++### 22_build_enzyme_groups.py (status: OK)
++- Produces enzyme-level grouping used by `rank_loss` hook.
++
++### 23_augment_targets_and_scaffold.py (status: OK)
++- Adds LOG_KCAT / LOG_KM / LOG_KCAT_KM and Murcko `SCAFFOLD_ID`.
++
++### 24_pair_pipeline.py (status: WATCH)
++- **Purpose.** 3-phase docking driver: prep receptors → prep ligands → parallel dock+extract → aggregate.
++- **Invariants.** Uses `importlib.util.spec_from_file_location` to import sibling `14_*` / `20_*` scripts whose filenames start with digits.
++- **Risks.**
++  - Phase 3 is parallel; `run_status.csv` appends are not locked — if two workers collide, rows may interleave. For small N this is fine; for a full run, either serialize writes or switch to per-worker status files.
++  - Phase 4 aggregator reads per-pair `.pkl` blobs and builds `pockets_pair.pt`; must match the dict shape 25 expects (`node_s`, `node_v`, `ca_xyz`, `n_residues`, `dock_score`, `pocket_source`).
++- **Status.** WATCH until a real pair run completes and 25 signs off.
++
++### 25_validate_pair_pockets.py (status: OK)
++- **Purpose.** Post-run hard/soft validation of `pockets_pair.pt`.
++- **Invariants.** Exit codes 0 (READY) / 1 (STOP) / 2 (WARN) used by CI wrappers.
++- **Status.** OK — read-only, exits early on missing artifact.
++
++### 26_generate_ablation_configs.py (status: OK)
++- **Purpose.** Emits A0..A8 ablation YAMLs with disambiguated ckpt/log paths.
++- **Invariants.** Each row inherits from the one above; A8 == `v4_ultimate.yml` semantically.
++- **Status.** OK — generated 9 configs, spot-checked A0/A4/A8 flags.
++
++---
++
++## src/util/
++
++### data_module.py (status: WATCH)
++- **Purpose.** PyG data representer; attaches all modality tensors under namespaced keys (`SEQ_*`, `MOL_*`, `POCKET_*`, `RXN_*`, `ANNOT_*`, `COND_*`, `EC_*`, `Y_*`).
++- **Invariants.** `__inc__` returns 0 for all scalar-per-graph keys so batching doesn't offset them.
++- **Risks.** Any new key added to the model must also be declared in `__inc__` / `follow_batch` lists, or PyG will try to shift it as an edge-index-like tensor.
++- **Status.** WATCH — future contributors must remember the __inc__ contract.
++
++### featurize/seq_prot5.py (status: OK)
++- Reads precomputed ProtT5 from LMDB; `precomputed_only=True` is enforced upstream.
++
++### metrics.py (status: OK)
++- Within-enzyme Spearman / top-1 hit / pair accuracy; unit-tested against synthetic data (within-Spearman 0.78 at noise=0.5).
++
++---
++
++## Known open items
++
++1. **v4_ultimate smoke run** — no end-to-end run with all 6 branches on + diagnostics yet. Until then the branch-magnitude / gate-mean expectations in this doc are hypotheses.
++2. **run_status.csv write contention (24)** — benign for current N; revisit if we scale past ~4 workers.
++3. **v4_innovate training driver** — model exists, trainer entry does not; novelty path is paper-facing, not on the first-submission critical path.
+diff --git a/config/ablation/v4_ultimate_A0_seq.yml b/config/ablation/v4_ultimate_A0_seq.yml
+new file mode 100644
+index 0000000..3106a3c
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A0_seq.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A0_seq
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: false
++  use_rxn_center: false
++  use_pocket: false
++  use_int3d: false
++  use_annot: false
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A0_seq
++  log_path: train/log_ablation/v4_ultimate_A0_seq
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A1_sub.yml b/config/ablation/v4_ultimate_A1_sub.yml
+new file mode 100644
+index 0000000..7bcae7a
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A1_sub.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A1_sub
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: false
++  use_rxn_center: false
++  use_pocket: false
++  use_int3d: false
++  use_annot: false
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A1_sub
++  log_path: train/log_ablation/v4_ultimate_A1_sub
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A2_rxn_center.yml b/config/ablation/v4_ultimate_A2_rxn_center.yml
+new file mode 100644
+index 0000000..ea7cbcb
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A2_rxn_center.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A2_rxn_center
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: false
++  use_rxn_center: true
++  use_pocket: false
++  use_int3d: false
++  use_annot: false
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A2_rxn_center
++  log_path: train/log_ablation/v4_ultimate_A2_rxn_center
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A3_drfp.yml b/config/ablation/v4_ultimate_A3_drfp.yml
+new file mode 100644
+index 0000000..f23c2be
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A3_drfp.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A3_drfp
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: true
++  use_rxn_center: true
++  use_pocket: false
++  use_int3d: false
++  use_annot: false
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A3_drfp
++  log_path: train/log_ablation/v4_ultimate_A3_drfp
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A4_pocket.yml b/config/ablation/v4_ultimate_A4_pocket.yml
+new file mode 100644
+index 0000000..bd4bcac
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A4_pocket.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A4_pocket
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: true
++  use_rxn_center: true
++  use_pocket: true
++  use_int3d: false
++  use_annot: false
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A4_pocket
++  log_path: train/log_ablation/v4_ultimate_A4_pocket
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A5_int3d.yml b/config/ablation/v4_ultimate_A5_int3d.yml
+new file mode 100644
+index 0000000..5857936
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A5_int3d.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A5_int3d
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: true
++  use_rxn_center: true
++  use_pocket: true
++  use_int3d: true
++  use_annot: false
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A5_int3d
++  log_path: train/log_ablation/v4_ultimate_A5_int3d
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A6_annot.yml b/config/ablation/v4_ultimate_A6_annot.yml
+new file mode 100644
+index 0000000..8b24786
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A6_annot.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A6_annot
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: true
++  use_rxn_center: true
++  use_pocket: true
++  use_int3d: true
++  use_annot: true
++  use_condition: false
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A6_annot
++  log_path: train/log_ablation/v4_ultimate_A6_annot
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A7_condition.yml b/config/ablation/v4_ultimate_A7_condition.yml
+new file mode 100644
+index 0000000..01dcd51
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A7_condition.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A7_condition
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: true
++  use_rxn_center: true
++  use_pocket: true
++  use_int3d: true
++  use_annot: true
++  use_condition: true
++  use_ec: false
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A7_condition
++  log_path: train/log_ablation/v4_ultimate_A7_condition
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/ablation/v4_ultimate_A8_full.yml b/config/ablation/v4_ultimate_A8_full.yml
+new file mode 100644
+index 0000000..31f2151
+--- /dev/null
++++ b/config/ablation/v4_ultimate_A8_full.yml
+@@ -0,0 +1,107 @@
++data:
++  data_representer: sequence_molecular_ultimate
++  train_data_df: data/processed/folds/train_fold0.csv
++  valid_data_df: data/processed/folds/valid_fold0.csv
++  test_data_df: data/processed/folds/test_fold0.csv
++  seq_lmdb:
++    lmdb: data/processed/seq_prot5.lmdb
++    map_size: 64424509440
++    max_seq_len: 1000
++    seq_fp: data/processed/seq.csv
++  mol_graph_path: data/processed/mol_graphs.pt
++  pocket_path: data/processed/pockets.pt
++  rxn_drfp_npy: data/processed/rxn_drfp.npy
++  rxn_drfp_keys_csv: data/processed/rxn_drfp_keys.csv
++  rxn_center_pt: data/processed/rxn_center_mask.pt
++  annotations_pt: data/processed/enzyme_annotations.pt
++  annotation_vocab: data/processed/annotation_vocabs.json
++model:
++  model_name: v4_ultimate_A8_full
++  hidden_dim: 128
++  dropout: 0.2
++  feature_norm: true
++  loss_type: logcosh
++  label_noise: 0.0
++  pcc_loss_weight: 0.3
++  rank_loss_weight: 0.1
++  rank_loss_substrate_weight: 0.1
++  rank_margin_enzyme: 0.1
++  rank_margin_substrate: 0.1
++  rank_max_pairs_enzyme: 16
++  rank_max_pairs_substrate: 16
++  rank_min_diff_enzyme: 0.1
++  rank_min_diff_substrate: 0.1
++  use_rxn_drfp: true
++  use_rxn_center: true
++  use_pocket: true
++  use_int3d: true
++  use_annot: true
++  use_condition: true
++  use_ec: true
++  seq_module:
++    seq_hidden_dim: 512
++  substrate_gnn:
++    enabled: true
++    n_layers: 4
++    dropout: 0.1
++  int3d:
++    n_layers: 2
++    n_head: 4
++    rbf_bins: 32
++    max_dist: 20.0
++  struct:
++    in_s_dim: 26
++    in_v_dim: 2
++    v_hidden: 16
++    gvp_layers: 3
++    edge_s_dim: 16
++    edge_v_dim: 1
++    gate_init_bias: -2.0
++  drfp_dim: 2048
++  annot_vocab:
++    interpro_family_vocab: 6000
++    pfam_family_vocab: 3000
++    go_term_vocab: 2000
++    embed_dim: 32
++    max_fam_per_enzyme: 16
++  ec:
++    ec1_vocab: 8
++    ec2_vocab: 200
++    ec3_vocab: 200
++    ec4_vocab: 1200
++    ec_embed_dim: 16
++  embedding:
++    morgan: false
++    molt5: false
++    grover: false
++    unimol: false
++    pro_seq: true
++  use_msa: false
++  output_header:
++    act_fn: relu
++    hidden_dim: 256
++    norm_fn: layer
++    num_layers: 4
++train:
++  batch_size: 10
++  max_epochs: 100
++  min_epochs: 20
++  earlystrop_patience: 25
++  grad_accum: 2
++  precision: bf16-mixed
++  seed: 42
++  valid_freq: 1.0
++  n_cpus: 8
++  n_gpu:
++  - 0
++  device: cuda
++  checkpoint_path: train/ckpt_ablation/v4_ultimate_A8_full
++  log_path: train/log_ablation/v4_ultimate_A8_full
++  optimizer:
++    name: adamW
++    lr: 8.0e-05
++    weight_decay: 0.01
++    warm_epoch: 5
++    sched_factor: 0.5
++    sched_patience: 10
++    min_lr: 1.0e-06
+diff --git a/config/v4_ultimate.yml b/config/v4_ultimate.yml
+index 543162f..ad77472 100644
+--- a/config/v4_ultimate.yml
++++ b/config/v4_ultimate.yml
+@@ -54,6 +54,14 @@ model:
+   use_condition: true
+   use_ec: true
+ 
++  # Per-sample modality dropout at training time only. Zeroes both the
++  # gate-visible embedding and the final y_* contribution of the branch
++  # for a random subset of the batch. Inference keeps every modality.
++  modality_dropout:
++    rxn:    0.15      # drop DRFP reaction branch
++    pocket: 0.15      # drop pocket + int3d together (shared signal)
++    annot:  0.15      # drop InterPro/Pfam/GO branch
++
+   seq_module:
+     seq_hidden_dim: 512
+ 
+diff --git a/scripts/26_generate_ablation_configs.py b/scripts/26_generate_ablation_configs.py
+new file mode 100644
+index 0000000..1d7c6c4
+--- /dev/null
++++ b/scripts/26_generate_ablation_configs.py
+@@ -0,0 +1,98 @@
++"""
++DLcatalysis 4.0 — v4-ultimate ablation matrix generator.
++
++Emits a family of YAML configs that progressively enable each modality,
++so we can measure the incremental contribution of every branch of the
++v4-ultimate residual:
++
++    pred = y_seq + g_pair*(y_sub + y_rxn + y_int3d)
++                + g_struct * y_struct
++                + g_annot  * y_annot
++
++Ablation ladder (each row keeps everything from the row above):
++
++    A0  seq          seq only (ProtT5 + attn pool + MLP)
++    A1  +sub         +substrate GINE, no rxn_center
++    A2  +rxn_center  +RXNMapper reacting-center atom flag
++    A3  +drfp        +DRFP reaction fingerprint
++    A4  +pocket      +GVP pocket encoder
++    A5  +int3d       +pocket × atom 3D cross-attention
++    A6  +annot       +InterPro / Pfam / GO bag-of-words
++    A7  +condition   +pH / temperature conditioning
++    A8  full         +EC 4-level embedding   (== v4_ultimate)
++
++Run:
++    python scripts/26_generate_ablation_configs.py \\
++        --base  config/v4_ultimate.yml \\
++        --out   config/ablation/
++
++Output: config/ablation/v4_ultimate_A{0..8}_{tag}.yml
++Each config gets a disambiguated log_path / checkpoint_path / model_name
++so Lightning will not overwrite runs from sibling ablations.
++"""
++import argparse
++import copy
++from pathlib import Path
++
++import yaml
++
++
++# (id, tag, flag overrides) — applied in order on top of the previous row
++LADDER = [
++    ("A0", "seq",         dict(use_rxn_drfp=False, use_rxn_center=False,
++                               use_pocket=False,   use_int3d=False,
++                               use_annot=False,    use_condition=False,
++                               use_ec=False)),
++    ("A1", "sub",         dict()),                         # GINE always on
++    ("A2", "rxn_center",  dict(use_rxn_center=True)),
++    ("A3", "drfp",        dict(use_rxn_drfp=True)),
++    ("A4", "pocket",      dict(use_pocket=True)),
++    ("A5", "int3d",       dict(use_int3d=True)),
++    ("A6", "annot",       dict(use_annot=True)),
++    ("A7", "condition",   dict(use_condition=True)),
++    ("A8", "full",        dict(use_ec=True)),
++]
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--base", default="config/v4_ultimate.yml")
++    ap.add_argument("--out",  default="config/ablation")
++    args = ap.parse_args()
++
++    base_path = Path(args.base)
++    out_dir   = Path(args.out)
++    out_dir.mkdir(parents=True, exist_ok=True)
++
++    with open(base_path, "r", encoding="utf-8") as f:
++        base = yaml.safe_load(f)
++
++    cur = copy.deepcopy(base)
++    # Start from the most-restrictive flags and layer back on
++    flags = copy.deepcopy(LADDER[0][2])
++    for aid, tag, delta in LADDER:
++        flags.update(delta)
++        cfg = copy.deepcopy(cur)
++
++        # Override feature flags
++        for k, v in flags.items():
++            cfg["model"][k] = v
++
++        # Disambiguate artifacts
++        name = f"v4_ultimate_{aid}_{tag}"
++        cfg["model"]["model_name"] = name
++        cfg["train"]["checkpoint_path"] = f"train/ckpt_ablation/{name}"
++        cfg["train"]["log_path"]        = f"train/log_ablation/{name}"
++
++        out_path = out_dir / f"{name}.yml"
++        with open(out_path, "w", encoding="utf-8") as f:
++            yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
++        enabled = [k.replace("use_", "") for k, v in flags.items() if v]
++        print(f"[write] {out_path}")
++        print(f"        enabled: {enabled}")
++
++    print(f"\n[done] {len(LADDER)} ablation configs in {out_dir}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/model/int3d_cross_attn.py b/src/model/int3d_cross_attn.py
+index 6ff1634..3129aec 100644
+--- a/src/model/int3d_cross_attn.py
++++ b/src/model/int3d_cross_attn.py
+@@ -56,6 +56,12 @@ class Int3DCrossAttnLayer(nn.Module):
+         # Distance bias projections (shared across directions)
+         self.dist_proj = nn.Linear(n_rbf, n_heads)
+ 
++        # Near-attack conformation (NAC) bias: per-head learnable gain
++        # applied to the outer product of (catalytic residue indicator) ×
++        # (reaction-center atom indicator). Init at zero so behavior matches
++        # prior checkpoints unless the model learns to turn it on.
++        self.nac_gain = nn.Parameter(torch.zeros(n_heads))
++
+         self.p_out = nn.Linear(hidden_dim, hidden_dim)
+         self.a_out = nn.Linear(hidden_dim, hidden_dim)
+         self.ln_p = nn.LayerNorm(hidden_dim)
+@@ -86,7 +92,9 @@ class Int3DCrossAttnLayer(nn.Module):
+                 p_mask: torch.Tensor, a_mask: torch.Tensor,
+                 xyz_p: Optional[torch.Tensor] = None,
+                 xyz_a: Optional[torch.Tensor] = None,
+-                xyz_valid_per_sample: Optional[torch.Tensor] = None):
++                xyz_valid_per_sample: Optional[torch.Tensor] = None,
++                p_nac: Optional[torch.Tensor] = None,
++                a_nac: Optional[torch.Tensor] = None):
+         """
+         p_tokens (B, K, D), a_tokens (B, A, D)
+         p_mask   (B, K) bool, a_mask (B, A) bool  (True = valid)
+@@ -98,6 +106,11 @@ class Int3DCrossAttnLayer(nn.Module):
+                                          fallback. This prevents one valid
+                                          sample enabling fake distance bias
+                                          for invalid zero-coord samples.
++        p_nac    (B, K) float in [0,1] — catalytic-residue indicator
++        a_nac    (B, A) float in [0,1] — reaction-center atom indicator
++                 Their outer product is added as a learnable per-head bias
++                 to the attention logits, nudging attention toward
++                 catalytic residue ↔ reacting atom pairs (NAC proxy).
+         """
+         B, K, _ = p_tokens.shape
+         _, A, _ = a_tokens.shape
+@@ -113,6 +126,16 @@ class Int3DCrossAttnLayer(nn.Module):
+         else:
+             bias = None
+ 
++        # NAC bias: catalytic × reaction-center outer product, per-head gain.
++        # Kept as a separate additive term so distance and NAC signals are
++        # independent (and either can be learned off).
++        if p_nac is not None and a_nac is not None:
++            nac_outer = (p_nac.float().unsqueeze(-1)
++                         * a_nac.float().unsqueeze(-2))          # (B, K, A)
++            nac_bias = (nac_outer.unsqueeze(1)
++                        * self.nac_gain.view(1, -1, 1, 1))       # (B, H, K, A)
++            bias = nac_bias if bias is None else (bias + nac_bias)
++
+         # Pocket ← atom (Q from pocket, K/V from atom)
+         Qp = self._split_heads(self.p_q(p_tokens))   # (B, H, K, d_head)
+         Ka = self._split_heads(self.a_k(a_tokens))   # (B, H, A, d_head)
+@@ -170,11 +193,13 @@ class Int3DCrossAttn(nn.Module):
+ 
+     def forward(self, p_tokens, a_tokens, p_mask, a_mask,
+                 xyz_p=None, xyz_a=None,
+-                xyz_valid_per_sample=None):
++                xyz_valid_per_sample=None,
++                p_nac=None, a_nac=None):
+         p, a = p_tokens, a_tokens
+         for layer in self.layers:
+             p, a = layer(p, a, p_mask, a_mask, xyz_p, xyz_a,
+-                         xyz_valid_per_sample=xyz_valid_per_sample)
++                         xyz_valid_per_sample=xyz_valid_per_sample,
++                         p_nac=p_nac, a_nac=a_nac)
+         p_pool = self._attn_pool(p, p_mask, self.pool_p)  # (B, D)
+         a_pool = self._attn_pool(a, a_mask, self.pool_a)  # (B, D)
+         return p, a, p_pool, a_pool
+diff --git a/src/model/v4_ultimate.py b/src/model/v4_ultimate.py
+index f9ee4f0..4ea35c9 100644
+--- a/src/model/v4_ultimate.py
++++ b/src/model/v4_ultimate.py
+@@ -298,7 +298,7 @@ class V4Ultimate(pl.LightningModule):
+     def _encode_substrate(self, G, B):
+         if not hasattr(G, "MOL_graph_x") or G.MOL_graph_x is None:
+             z = torch.zeros(B, self.hidden_dim, device=self.device)
+-            return None, z, None
++            return None, z, None, None
+         num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
+         graph_batch = torch.repeat_interleave(
+             torch.arange(num_nodes.size(0), device=self.device), num_nodes
+@@ -309,11 +309,19 @@ class V4Ultimate(pl.LightningModule):
+             edge_attr=G.MOL_graph_edge_attr.to(self.device),
+             batch=graph_batch,
+         )
+-        # Add RXNMapper center flag to atom tokens (if available)
++        # Reaction-center dense flag, kept around for the NAC bias in int3d
++        # even when `use_rxn_center` (the atom-token injection) is disabled.
++        rxn_center_dense = None
++        if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
++            from torch_geometric.utils import to_dense_batch
++            center_flag_long = G.MOL_rxn_center.to(self.device).long()
++            rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
++                                                 graph_batch)            # (B, A)
++        # Add RXNMapper center flag to atom tokens (if enabled)
+         if self.use_rxn_center and hasattr(G, "MOL_rxn_center"):
+             from torch_geometric.utils import to_dense_batch
+             center_flag = G.MOL_rxn_center.to(self.device).long()
+-            center_dense, _ = to_dense_batch(center_flag, graph_batch)  # (B, A)
++            center_dense, _ = to_dense_batch(center_flag, graph_batch)   # (B, A)
+             center_emb = self.rxn_center_emb(center_dense)               # (B, A, D)
+             m = atom_mask.unsqueeze(-1).float()                          # (B, A, 1)
+             # Atom-level: add only where atom is valid
+@@ -323,7 +331,7 @@ class V4Ultimate(pl.LightningModule):
+             masked_sum = (center_emb * m).sum(dim=1)                     # (B, D)
+             n_atoms = m.sum(dim=1).clamp(min=1.0)                        # (B, 1)
+             graph_emb = graph_emb + masked_sum / n_atoms
+-        return atom_tokens, graph_emb, atom_mask
++        return atom_tokens, graph_emb, atom_mask, rxn_center_dense
+ 
+     def _encode_rxn(self, G, B):
+         if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+@@ -331,9 +339,18 @@ class V4Ultimate(pl.LightningModule):
+         drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+         return self.rxn_proj(drfp)
+ 
++    # Catalytic-residue prior used as a soft NAC bias in int3d.
++    # Indices correspond to STANDARD_AA order in scripts/14_extract_pockets.py:
++    # 1 ARG, 3 ASP, 4 CYS, 6 GLU, 8 HIS, 11 LYS, 15 SER, 18 TYR. These eight
++    # residues account for the vast majority of catalytic activity in MCSA
++    # (acid/base, nucleophile, metal-coordinating side chains).
++    _CATALYTIC_AA_IDX = (1, 3, 4, 6, 8, 11, 15, 18)
++
+     def _encode_pocket(self, G, B):
+         if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+-            return None, torch.zeros(B, self.hidden_dim, device=self.device), None, None
++            return (None,
++                    torch.zeros(B, self.hidden_dim, device=self.device),
++                    None, None, None)
+         node_s = G.POCKET_node_s.to(self.device).float()
+         node_v = G.POCKET_node_v.to(self.device).float()
+         edge_index = G.POCKET_edge_index.to(self.device).long()
+@@ -349,7 +366,19 @@ class V4Ultimate(pl.LightningModule):
+         ca_xyz = G.POCKET_ca_xyz.to(self.device).float()
+         from torch_geometric.utils import to_dense_batch
+         pocket_xyz, _ = to_dense_batch(ca_xyz, batch)
+-        return p_tokens, p_pool, p_mask, pocket_xyz
++
++        # Catalytic-residue soft indicator for NAC bias. UniProt annotation
++        # (is_active_site / is_binding_site) is treated as strong evidence;
++        # the amino-acid-type prior is a weaker (0.5) fallback when the
++        # enzyme has no catalytic-site annotation.
++        is_annot = (node_s[:, 21] + node_s[:, 22]).clamp(max=1.0)  # (N_total,)
++        cat_idx = torch.tensor(self._CATALYTIC_AA_IDX,
++                               device=self.device, dtype=torch.long)
++        is_aa = node_s[:, cat_idx].sum(dim=-1).clamp(max=1.0)     # (N_total,)
++        cat_score = torch.maximum(is_annot, 0.5 * is_aa)
++        cat_dense, _ = to_dense_batch(cat_score, batch)           # (B, K)
++
++        return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
+ 
+     def _encode_annot(self, G, B):
+         if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+@@ -405,9 +434,11 @@ class V4Ultimate(pl.LightningModule):
+ 
+         # Encode all modalities
+         _, enz_pool, _ = self._encode_enzyme(G, B)
+-        atom_tokens, graph_emb, atom_mask = self._encode_substrate(G, B)
++        atom_tokens, graph_emb, atom_mask, rxn_center_dense = \
++            self._encode_substrate(G, B)
+         rxn_emb = self._encode_rxn(G, B)
+-        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz = self._encode_pocket(G, B)
++        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz, pocket_cat = \
++            self._encode_pocket(G, B)
+         annot_emb = self._encode_annot(G, B)
+         cond_emb = self._encode_condition(G, B)
+         ec_emb = self._encode_ec(G, B)
+@@ -415,6 +446,26 @@ class V4Ultimate(pl.LightningModule):
+         # Fuse enzyme: baseline enzyme embedding mixes seq + condition (+ maybe more)
+         enz_fused = enz_pool + cond_emb
+ 
++        # ── Modality dropout ──
++        # During training, drop each auxiliary modality with a config-level
++        # probability per sample. The same survival mask is applied to (a) the
++        # pooled embedding used by gates and (b) the final y_* contribution,
++        # so "dropped" truly means the branch contributes zero for that
++        # sample. Inference always keeps all modalities — dropout only
++        # regularizes training. This lets us ablate modalities at test time
++        # (e.g. inference without pocket) without retraining from scratch.
++        md = self.config["model"].get("modality_dropout", {}) or {}
++        def _keep(p):
++            if (not self.training) or p <= 0.0:
++                return torch.ones(B, 1, device=self.device)
++            return (torch.rand(B, 1, device=self.device) >= float(p)).float()
++        keep_rxn    = _keep(md.get("rxn",    0.0))
++        keep_pocket = _keep(md.get("pocket", 0.0))
++        keep_annot  = _keep(md.get("annot",  0.0))
++        rxn_emb    = rxn_emb    * keep_rxn
++        pocket_pool = pocket_pool * keep_pocket
++        annot_emb  = annot_emb  * keep_annot
++
+         # ── Branches ──
+         y_seq = self.head_seq(enz_fused)
+         y_sub = self.head_sub(graph_emb)
+@@ -437,6 +488,7 @@ class V4Ultimate(pl.LightningModule):
+                 pocket_tokens, atom_tokens, pocket_mask, atom_mask,
+                 xyz_p=pocket_xyz, xyz_a=atom_xyz,
+                 xyz_valid_per_sample=xyz_valid_per_sample,
++                p_nac=pocket_cat, a_nac=rxn_center_dense,
+             )
+             y_int3d = self.head_int3d(torch.cat([p_pool_int, a_pool_int], dim=-1))
+         else:
+@@ -445,6 +497,15 @@ class V4Ultimate(pl.LightningModule):
+         y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens is not None else torch.zeros(B, 1, device=self.device)
+         y_annot  = self.head_annot(annot_emb)  if self.use_annot  else torch.zeros(B, 1, device=self.device)
+ 
++        # Modality dropout at output level. Heads on zeroed embeddings still
++        # emit the head bias term, so we explicitly zero the y_* contribution
++        # for dropped samples. keep_* is all-ones during inference (see
++        # _keep), so eval metrics are unaffected.
++        y_rxn    = y_rxn    * keep_rxn
++        y_struct = y_struct * keep_pocket
++        y_int3d  = y_int3d  * keep_pocket
++        y_annot  = y_annot  * keep_annot
++
+         # ── Gates ──
+         pair_gate_in = [enz_fused, graph_emb]
+         if self.use_rxn_drfp:
+@@ -491,8 +552,61 @@ class V4Ultimate(pl.LightningModule):
+         else:
+             self._last_log_var = None
+ 
++        # ── Diagnostics ──
++        # Emits branch magnitudes, gate means, and modality coverage once a
++        # trainer is attached. Guarded so the model still runs standalone
++        # (unit tests / scripted inference) without a Lightning trainer.
++        if getattr(self, "_trainer", None) is not None:
++            self._log_diag(
++                B=B, G=G,
++                y_seq=y_seq, y_sub=y_sub, y_rxn=y_rxn,
++                y_int3d=y_int3d, y_struct=y_struct, y_annot=y_annot,
++                g_pair=g_pair, g_struct=g_struct, g_annot=g_annot,
++                atom_mask=atom_mask, pocket_mask=pocket_mask,
++            )
++
+         return pred, G.y
+ 
++    # ──────────────────────────────────────────────────────────────
++    # Diagnostics
++    # ──────────────────────────────────────────────────────────────
++    def _log_diag(self, *, B, G,
++                  y_seq, y_sub, y_rxn, y_int3d, y_struct, y_annot,
++                  g_pair, g_struct, g_annot,
++                  atom_mask, pocket_mask):
++        def _log(name, value):
++            self.log(f"diag/{name}", value,
++                     on_step=False, on_epoch=True,
++                     sync_dist=True, batch_size=B)
++
++        # Branch magnitudes (mean |y_*|) — tells you which branch dominates pred
++        _log("y_seq_abs",    y_seq.detach().abs().mean())
++        _log("y_sub_abs",    y_sub.detach().abs().mean())
++        _log("y_rxn_abs",    y_rxn.detach().abs().mean())
++        _log("y_int3d_abs",  y_int3d.detach().abs().mean())
++        _log("y_struct_abs", y_struct.detach().abs().mean())
++        _log("y_annot_abs",  y_annot.detach().abs().mean())
++
++        # Gate means — tells you how much each branch is actually mixed in
++        _log("g_pair_mean",   g_pair.detach().mean())
++        _log("g_struct_mean", g_struct.detach().mean())
++        _log("g_annot_mean",  g_annot.detach().mean())
++
++        # Modality coverage (fraction of the batch with real signal)
++        has_rxn = float(hasattr(G, "RXN_drfp"))
++        has_atoms = float(atom_mask.any().item()) if atom_mask is not None else 0.0
++        has_pocket = float(pocket_mask.any().item()) if pocket_mask is not None else 0.0
++        _log("cov_rxn_drfp", torch.tensor(has_rxn, device=self.device))
++        _log("cov_atoms",    torch.tensor(has_atoms, device=self.device))
++        _log("cov_pocket",   torch.tensor(has_pocket, device=self.device))
++
++        if hasattr(G, "ANNOT_has_any"):
++            _log("cov_annot", G.ANNOT_has_any.float().mean())
++        if hasattr(G, "ANNOT_has_cof"):
++            _log("cov_cof", G.ANNOT_has_cof.float().mean())
++        if hasattr(G, "MOL_graph_xyz_valid"):
++            _log("cov_mol_xyz", G.MOL_graph_xyz_valid.float().mean())
++
+     # ──────────────────────────────────────────────────────────────
+     # Loss / metrics / steps — identical machinery as v4_pocket
+     # ──────────────────────────────────────────────────────────────

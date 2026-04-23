@@ -1,0 +1,15 @@
+Loaded cached credentials.
+*   **src/model/v4_ultimate.py (line ~490)**
+    *   **Description:** `self.int3d` is unpacked into exactly two variables (`p_pool_int, a_pool_int`), but `Int3DCrossAttn.forward` returns four variables (`p, a, p_pool, a_pool`).
+    *   **Why it matters:** This is a fatal shape mismatch. It will raise a `ValueError: too many values to unpack (expected 2)` and unconditionally crash the forward pass whenever `use_int3d` is true.
+    *   **Suggested fix:** Change the assignment to unpack all four values, discarding the sequence tokens: `_, _, p_pool_int, a_pool_int = self.int3d(...)`.
+
+*   **src/model/v4_ultimate.py (line ~598)**
+    *   **Description:** `cov_atoms` and `cov_pocket` use `mask.any().item()`, which returns 1.0 if *any* sample in the batch has valid data, rather than measuring the fraction of the batch.
+    *   **Why it matters:** Modality coverage diagnostics will falsely log near 100% coverage as long as one sample per batch is valid, completely obscuring the true missing-data rate.
+    *   **Suggested fix:** Calculate the per-sample coverage fraction instead: `mask.any(dim=1).float().mean()`.
+
+*   **src/model/v4_ultimate.py (line ~560)**
+    *   **Description:** `_log_diag` computes branch magnitudes (e.g., `y_rxn.detach().abs().mean()`) *after* the `keep_*` modality dropout masks have zeroed out samples.
+    *   **Why it matters:** The logged branch magnitude during training will be artificially deflated by the dropout probability (e.g., tracking `0.85 * true_mean`), skewing the diagnostic interpretation of which branch dominates.
+    *   **Suggested fix:** Pass the unmasked `y_*` predictions to `_log_diag`, or scale the logged metric by `1 / (1 - p)`.

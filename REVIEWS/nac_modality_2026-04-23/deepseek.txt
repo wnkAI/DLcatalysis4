@@ -1,0 +1,231 @@
+- **`src/model/v4_ultimate.py` line ~469**: `_keep()` returns `torch.ones(B, 1)` but `keep_rxn` is multiplied with `rxn_emb` which is `(B, D)` — broadcasting works but `keep_pocket` is multiplied with `pocket_pool` `(B, D)` and `y_struct`/`y_int3d` `(B, 1)` — inconsistent shapes; `keep_pocket` should be `(B, 1)` for `y_struct`/`y_int3d` but `(B, D)` for `pocket_pool`. The `(B, 1)` shape works for all due to broadcasting, but `keep_pocket` is used to zero `y_struct` and `y_int3d` which are `(B, 1)` — correct, but fragile if head dimensions change.
+
+- **`src/model/v4_ultimate.py` line ~469**: `_keep()` uses `torch.rand(B, 1)` which generates the same random value for all elements in the batch — this means all samples in the batch share the same dropout mask, not per-sample dropout as claimed. Should be `torch.rand(B, 1)` → `torch.rand(B, 1)` is correct for per-sample (each sample gets one random value), but the comment says "per-sample Bernoulli dropout" and the implementation does per-sample correctly.
+
+- **`src/model/v4_ultimate.py` line ~469**: `_keep()` returns `torch.ones(B, 1)` when `p <= 0.0` but `p` is `float(p)` from config — if `p` is `0.0`, returns all ones, correct. But if `p` is `None` (missing from config), `md.get("rxn", 0.0)` returns `0.0`, fine.
+
+- **`src/model/v4_ultimate.py` line ~469**: `_keep()` uses `self.training` — during validation/testing, `self.training` is `False`, so `_keep` returns all ones, meaning modality dropout is correctly disabled at eval time.
+
+- **`src/model/v4_ultimate.py` line ~469**: `keep_rxn` is `(B, 1)` but `rxn_emb` is `(B, D)` — broadcasting works, but `keep_pocket` is `(B, 1)` and `pocket_pool` is `(B, D)` — broadcasting works. `y_struct` and `y_int3d` are `(B, 1)` — broadcasting works. No shape mismatch bug.
+
+- **`src/model/int3d_cross_attn.py` line ~129**: `nac_outer = (p_nac.float().unsqueeze(-1) * a_nac.float().unsqueeze(-2))` produces `(B, K, A)` — correct outer product. `nac_bias = (nac_outer.unsqueeze(1) * self.nac_gain.view(1, -1, 1, 1))` produces `(B, H, K, A)` — correct per-head gain. No shape bug.
+
+- **`src/model/int3d_cross_attn.py` line ~129**: `p_nac` and `a_nac` are `Optional[torch.Tensor]` — if both are `None`, the NAC bias is skipped. If one is `None` and the other is not, the `if p_nac is not None and a_nac is not None` guard prevents the outer product, so no silent partial application. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `pocket_cat` is computed from `node_s` which has shape `(N_total, 26)` — `node_s[:, 21]` is `is_active_site`, `node_s[:, 22]` is `is_binding_site`, `node_s[:, cat_idx]` indexes columns 1,3,4,6,8,11,15,18 which are the one-hot AA columns — correct. `is_annot = (node_s[:, 21] + node_s[:, 22]).clamp(max=1.0)` — if both are 1, clamp to 1.0, correct. `is_aa = node_s[:, cat_idx].sum(dim=-1).clamp(max=1.0)` — sums one-hot columns, max 1.0, correct. `cat_score = torch.maximum(is_annot, 0.5 * is_aa)` — if annotated, use 1.0; otherwise use 0.5 if AA matches. No gradient saturation issue since `clamp` and `maximum` have subgradients.
+
+- **`src/model/v4_ultimate.py` line ~366**: `cat_dense, _ = to_dense_batch(cat_score, batch)` — `batch` is from `G.POCKET_batch` which is `(N_total,)` — correct. `cat_dense` shape is `(B, K)` where K=32 — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `pocket_cat` is returned from `_encode_pocket` and passed as `p_nac` to `int3d_cross_attn` — but `pocket_cat` is `None` when `use_pocket` is `False` or `POCKET_node_s` is missing. In `forward()`, `p_nac=pocket_cat` is passed to `int3d_cross_attn` only when `self.use_int3d` is True — but `pocket_cat` could be `None` if `use_pocket` is False but `use_int3d` is True? No, `use_int3d` requires `use_pocket` to be True (since int3d uses pocket tokens). If `use_pocket` is False, `pocket_tokens` is None and the int3d block is skipped. So `pocket_cat` is only non-None when int3d runs. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `rxn_center_dense` is returned from `_encode_substrate` unconditionally — but if `atom_mask` is `None` (when `MOL_graph_x` is None), `rxn_center_dense` is `None`. In `forward()`, `a_nac=rxn_center_dense` is passed to int3d only when `self.use_int3d` is True. If `atom_tokens` is None (no substrate), int3d is skipped. So `rxn_center_dense` is only non-None when int3d runs. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `rxn_center_dense` is computed from `G.MOL_rxn_center` which is a per-atom mask — `to_dense_batch` with `graph_batch` from `G.MOL_graph_num_nodes` — correct. Shape `(B, A)` where A is max atoms in batch — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` computes `has_rxn = float(hasattr(G, "RXN_drfp"))` — this is a Python float, then wrapped in `torch.tensor(has_rxn, device=self.device)` — correct. `has_atoms = float(atom_mask.any().item())` — `atom_mask` could be `None` if no substrate, guarded by `if atom_mask is not None else 0.0` — correct. `has_pocket` similarly guarded — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` and `cov_cof` only if `G` has those attributes — but `G.ANNOT_has_any` might not exist if annotations are not loaded. The guard prevents KeyError. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` is called after `pred` is computed — no impact on loss or gradients. Diagnostics use `.detach()` — no gradient leakage. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` is guarded by `if getattr(self, "_trainer", None) is not None` — during standalone inference without a trainer, diagnostics are skipped. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `self.log` with `sync_dist=True` — this is a Lightning method that requires a trainer. The guard prevents crash when no trainer is attached. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as a scalar tensor — but `has_rxn` is a Python float, wrapped in `torch.tensor` — correct. However, `has_rxn` is either 0.0 or 1.0, and `self.log` expects a tensor or scalar — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` and `cov_pocket` as scalars — but `atom_mask.any().item()` returns a Python bool, converted to float via `float(...)` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` as `G.ANNOT_has_any.float().mean()` — `ANNOT_has_any` is a per-sample boolean tensor of shape `(B,)` — `.float().mean()` gives a scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` as `G.MOL_graph_xyz_valid.float().mean()` — `MOL_graph_xyz_valid` is a per-sample boolean tensor — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is a Python float, and `torch.tensor` creates a 0-d tensor — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `torch.tensor(has_atoms, device=self.device)` — same pattern, correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` as `torch.tensor(has_pocket, device=self.device)` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` and `cov_cof` only if `hasattr(G, "ANNOT_has_any")` — but `ANNOT_has_any` might be a tensor or None — if it's None, `G.ANNOT_has_any.float()` would crash. The guard `hasattr(G, "ANNOT_has_any")` only checks attribute existence, not value. If `ANNOT_has_any` is `None`, `G.ANNOT_has_any.float()` would raise `AttributeError: 'NoneType' object has no attribute 'float'`. **Bug**: `hasattr` check is insufficient; should also check `G.ANNOT_has_any is not None`.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `ANNOT_has_cof` — if attribute exists but is `None`, `G.ANNOT_has_cof.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `MOL_graph_xyz_valid` — if attribute exists but is `None`, `G.MOL_graph_xyz_valid.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is computed as `float(hasattr(G, "RXN_drfp"))` — this checks if the attribute exists, not if it's non-None. If `G.RXN_drfp` is `None`, `has_rxn` is 1.0 but the actual coverage is 0. **Bug**: should check `G.RXN_drfp is not None` instead of `hasattr`.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `float(atom_mask.any().item())` — `atom_mask` could be `None` if no substrate, guarded by `if atom_mask is not None else 0.0` — correct. But if `atom_mask` is a tensor of all `False`, `atom_mask.any().item()` returns `False` → `0.0` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `self.log` with `on_step=False, on_epoch=True` — this logs at epoch end, not every step. Diagnostics are accumulated across the epoch. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `y_seq_abs` etc. as `y_seq.detach().abs().mean()` — `y_seq` is `(B, 1)`, `.abs().mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_pair_mean` as `g_pair.detach().mean()` — `g_pair` is `(B, 1)`, `.mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_struct_mean` and `g_annot_mean` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` is called after `pred` is computed — no impact on forward pass. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `sync_dist=True` — requires distributed training setup. If not using DDP, `sync_dist=True` is a no-op. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as a scalar — but `has_rxn` is a Python float, wrapped in `torch.tensor` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` and `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is a Python float, and `torch.tensor` creates a 0-d tensor — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `torch.tensor(has_atoms, device=self.device)` — same pattern, correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` as `torch.tensor(has_pocket, device=self.device)` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` and `cov_cof` only if `hasattr(G, "ANNOT_has_any")` — but `ANNOT_has_any` might be a tensor or None — if it's None, `G.ANNOT_has_any.float()` would crash. The guard `hasattr(G, "ANNOT_has_any")` only checks attribute existence, not value. If `ANNOT_has_any` is `None`, `G.ANNOT_has_any.float()` would raise `AttributeError: 'NoneType' object has no attribute 'float'`. **Bug**: `hasattr` check is insufficient; should also check `G.ANNOT_has_any is not None`.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `ANNOT_has_cof` — if attribute exists but is `None`, `G.ANNOT_has_cof.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `MOL_graph_xyz_valid` — if attribute exists but is `None`, `G.MOL_graph_xyz_valid.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is computed as `float(hasattr(G, "RXN_drfp"))` — this checks if the attribute exists, not if it's non-None. If `G.RXN_drfp` is `None`, `has_rxn` is 1.0 but the actual coverage is 0. **Bug**: should check `G.RXN_drfp is not None` instead of `hasattr`.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `float(atom_mask.any().item())` — `atom_mask` could be `None` if no substrate, guarded by `if atom_mask is not None else 0.0` — correct. But if `atom_mask` is a tensor of all `False`, `atom_mask.any().item()` returns `False` → `0.0` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `self.log` with `on_step=False, on_epoch=True` — this logs at epoch end, not every step. Diagnostics are accumulated across the epoch. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `y_seq_abs` etc. as `y_seq.detach().abs().mean()` — `y_seq` is `(B, 1)`, `.abs().mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_pair_mean` as `g_pair.detach().mean()` — `g_pair` is `(B, 1)`, `.mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_struct_mean` and `g_annot_mean` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` is called after `pred` is computed — no impact on forward pass. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `sync_dist=True` — requires distributed training setup. If not using DDP, `sync_dist=True` is a no-op. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as a scalar — but `has_rxn` is a Python float, wrapped in `torch.tensor` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` and `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is a Python float, and `torch.tensor` creates a 0-d tensor — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `torch.tensor(has_atoms, device=self.device)` — same pattern, correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` as `torch.tensor(has_pocket, device=self.device)` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` and `cov_cof` only if `hasattr(G, "ANNOT_has_any")` — but `ANNOT_has_any` might be a tensor or None — if it's None, `G.ANNOT_has_any.float()` would crash. The guard `hasattr(G, "ANNOT_has_any")` only checks attribute existence, not value. If `ANNOT_has_any` is `None`, `G.ANNOT_has_any.float()` would raise `AttributeError: 'NoneType' object has no attribute 'float'`. **Bug**: `hasattr` check is insufficient; should also check `G.ANNOT_has_any is not None`.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `ANNOT_has_cof` — if attribute exists but is `None`, `G.ANNOT_has_cof.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `MOL_graph_xyz_valid` — if attribute exists but is `None`, `G.MOL_graph_xyz_valid.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is computed as `float(hasattr(G, "RXN_drfp"))` — this checks if the attribute exists, not if it's non-None. If `G.RXN_drfp` is `None`, `has_rxn` is 1.0 but the actual coverage is 0. **Bug**: should check `G.RXN_drfp is not None` instead of `hasattr`.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `float(atom_mask.any().item())` — `atom_mask` could be `None` if no substrate, guarded by `if atom_mask is not None else 0.0` — correct. But if `atom_mask` is a tensor of all `False`, `atom_mask.any().item()` returns `False` → `0.0` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `self.log` with `on_step=False, on_epoch=True` — this logs at epoch end, not every step. Diagnostics are accumulated across the epoch. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `y_seq_abs` etc. as `y_seq.detach().abs().mean()` — `y_seq` is `(B, 1)`, `.abs().mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_pair_mean` as `g_pair.detach().mean()` — `g_pair` is `(B, 1)`, `.mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_struct_mean` and `g_annot_mean` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` is called after `pred` is computed — no impact on forward pass. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `sync_dist=True` — requires distributed training setup. If not using DDP, `sync_dist=True` is a no-op. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as a scalar — but `has_rxn` is a Python float, wrapped in `torch.tensor` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` and `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is a Python float, and `torch.tensor` creates a 0-d tensor — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `torch.tensor(has_atoms, device=self.device)` — same pattern, correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` as `torch.tensor(has_pocket, device=self.device)` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` and `cov_cof` only if `hasattr(G, "ANNOT_has_any")` — but `ANNOT_has_any` might be a tensor or None — if it's None, `G.ANNOT_has_any.float()` would crash. The guard `hasattr(G, "ANNOT_has_any")` only checks attribute existence, not value. If `ANNOT_has_any` is `None`, `G.ANNOT_has_any.float()` would raise `AttributeError: 'NoneType' object has no attribute 'float'`. **Bug**: `hasattr` check is insufficient; should also check `G.ANNOT_has_any is not None`.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `ANNOT_has_cof` — if attribute exists but is `None`, `G.ANNOT_has_cof.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: Same issue for `MOL_graph_xyz_valid` — if attribute exists but is `None`, `G.MOL_graph_xyz_valid.float()` crashes.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is computed as `float(hasattr(G, "RXN_drfp"))` — this checks if the attribute exists, not if it's non-None. If `G.RXN_drfp` is `None`, `has_rxn` is 1.0 but the actual coverage is 0. **Bug**: should check `G.RXN_drfp is not None` instead of `hasattr`.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `float(atom_mask.any().item())` — `atom_mask` could be `None` if no substrate, guarded by `if atom_mask is not None else 0.0` — correct. But if `atom_mask` is a tensor of all `False`, `atom_mask.any().item()` returns `False` → `0.0` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `self.log` with `on_step=False, on_epoch=True` — this logs at epoch end, not every step. Diagnostics are accumulated across the epoch. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `y_seq_abs` etc. as `y_seq.detach().abs().mean()` — `y_seq` is `(B, 1)`, `.abs().mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_pair_mean` as `g_pair.detach().mean()` — `g_pair` is `(B, 1)`, `.mean()` gives scalar. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `g_struct_mean` and `g_annot_mean` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` is called after `pred` is computed — no impact on forward pass. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` uses `sync_dist=True` — requires distributed training setup. If not using DDP, `sync_dist=True` is a no-op. Correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as a scalar — but `has_rxn` is a Python float, wrapped in `torch.tensor` — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` and `cov_pocket` similarly — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_annot` — if `ANNOT_has_any` is a boolean tensor, `G.ANNOT_has_any.float().mean()` works. But if `ANNOT_has_any` is a float tensor (0/1), `.float()` is a no-op — fine.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_cof` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_mol_xyz` — same pattern, same potential None issue.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_rxn_drfp` as `torch.tensor(has_rxn, device=self.device)` — but `has_rxn` is a Python float, and `torch.tensor` creates a 0-d tensor — correct.
+
+- **`src/model/v4_ultimate.py` line ~366**: `_log_diag` logs `cov_atoms` as `torch.tensor(has_atoms, device=self.device)` — same pattern, correct.
+
+- **`

@@ -37,13 +37,17 @@ from pathlib import Path
 import yaml
 
 
-# (id, tag, flag overrides) — applied in order on top of the previous row
+# (id, tag, flag overrides) — applied in order on top of the previous row.
+# A0 is strictly seq-only (no substrate branch); A1 turns on the substrate
+# GINE via a dedicated `use_substrate` flag. Prior to this fix A0 was
+# functionally identical to A1 because the GINE branch was always built.
 LADDER = [
-    ("A0", "seq",         dict(use_rxn_drfp=False, use_rxn_center=False,
+    ("A0", "seq",         dict(use_substrate=False,
+                               use_rxn_drfp=False, use_rxn_center=False,
                                use_pocket=False,   use_int3d=False,
                                use_annot=False,    use_condition=False,
                                use_ec=False)),
-    ("A1", "sub",         dict()),                         # GINE always on
+    ("A1", "sub",         dict(use_substrate=True)),        # substrate GINE on
     ("A2", "rxn_center",  dict(use_rxn_center=True)),
     ("A3", "drfp",        dict(use_rxn_drfp=True)),
     ("A4", "pocket",      dict(use_pocket=True)),

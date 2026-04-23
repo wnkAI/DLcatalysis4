@@ -299,12 +299,17 @@ class V4Ultimate(pl.LightningModule):
         return (feat * weights).sum(dim=1)
 
     def _encode_enzyme(self, G, B):
-        if not hasattr(G, "SEQ_seq_padding_mask"):
+        # getattr-is-not-None (not hasattr) because upstream PyG Data objects
+        # occasionally set an optional field to None; hasattr would pass and
+        # the subsequent `.shape` / `.to` would crash.
+        _pad = getattr(G, "SEQ_seq_padding_mask", None)
+        _emb = getattr(G, "SEQ_embedding", None)
+        if _pad is None or _emb is None:
             z = torch.zeros(B, self.hidden_dim, device=self.device)
             return None, z, None
-        max_len = G.SEQ_seq_padding_mask.shape[1]
-        seq_mask = (~G.SEQ_seq_padding_mask).unsqueeze(-1).float().to(self.device)
-        x = G.SEQ_embedding.view(B, max_len, -1).to(self.device).float()
+        max_len = _pad.shape[1]
+        seq_mask = (~_pad).unsqueeze(-1).float().to(self.device)
+        x = _emb.view(B, max_len, -1).to(self.device).float()
         feat = self.seq_mlp(x)
         pooled = self._attn_pool_seq(feat, seq_mask, self.seq_attn_pool)
         return feat, pooled, seq_mask
@@ -312,9 +317,8 @@ class V4Ultimate(pl.LightningModule):
     def _encode_substrate(self, G, B):
         # Substrate branch can be fully disabled for A0 (seq-only) ablation:
         # no GINE forward, no parameters updated, returns zero embed.
-        if (not self.use_substrate
-                or not hasattr(G, "MOL_graph_x")
-                or G.MOL_graph_x is None):
+        _x = getattr(G, "MOL_graph_x", None)
+        if not self.use_substrate or _x is None:
             z = torch.zeros(B, self.hidden_dim, device=self.device)
             return None, z, None, None
         num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
@@ -322,7 +326,7 @@ class V4Ultimate(pl.LightningModule):
             torch.arange(num_nodes.size(0), device=self.device), num_nodes
         )
         atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
-            x=G.MOL_graph_x.to(self.device),
+            x=_x.to(self.device),
             edge_index=G.MOL_graph_edge_index.to(self.device),
             edge_attr=G.MOL_graph_edge_attr.to(self.device),
             batch=graph_batch,
@@ -358,9 +362,10 @@ class V4Ultimate(pl.LightningModule):
         return atom_tokens, graph_emb, atom_mask, rxn_center_dense
 
     def _encode_rxn(self, G, B):
-        if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+        _drfp = getattr(G, "RXN_drfp", None)
+        if not self.use_rxn_drfp or _drfp is None:
             return torch.zeros(B, self.hidden_dim, device=self.device)
-        drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+        drfp = _drfp.to(self.device).float().view(B, -1)
         return self.rxn_proj(drfp)
 
     # Catalytic-residue prior used as a soft NAC bias in int3d.
@@ -371,11 +376,12 @@ class V4Ultimate(pl.LightningModule):
     _CATALYTIC_AA_IDX = (1, 3, 4, 6, 8, 11, 15, 18)
 
     def _encode_pocket(self, G, B):
-        if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+        _node_s = getattr(G, "POCKET_node_s", None)
+        if not self.use_pocket or _node_s is None:
             return (None,
                     torch.zeros(B, self.hidden_dim, device=self.device),
                     None, None, None)
-        node_s = G.POCKET_node_s.to(self.device).float()
+        node_s = _node_s.to(self.device).float()
         # Column layout (backbone_features_v2): [0..19] AA one-hot, 20 pLDDT,
         # 21 is_active_site, 22 is_binding_site, 23 is_cofactor_contact,
         # 24 is_metal_contact, 25 min_dist_to_substrate/10. We index up to 22
@@ -413,12 +419,15 @@ class V4Ultimate(pl.LightningModule):
         return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
 
     def _encode_annot(self, G, B):
-        if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+        _ipr = getattr(G, "ANNOT_ipr_ids", None)
+        _pf  = getattr(G, "ANNOT_pf_ids",  None)
+        _go  = getattr(G, "ANNOT_go_ids",  None)
+        if not self.use_annot or _ipr is None or _pf is None or _go is None:
             return torch.zeros(B, self.hidden_dim, device=self.device)
         # IDs already padded to fixed max length with padding_idx=0 upstream
-        ipr_ids = G.ANNOT_ipr_ids.to(self.device).view(B, -1)  # (B, max_fam)
-        pf_ids  = G.ANNOT_pf_ids.to(self.device).view(B, -1)
-        go_ids  = G.ANNOT_go_ids.to(self.device).view(B, -1)
+        ipr_ids = _ipr.to(self.device).view(B, -1)  # (B, max_fam)
+        pf_ids  = _pf.to(self.device).view(B, -1)
+        go_ids  = _go.to(self.device).view(B, -1)
         # Mean pool over non-zero entries
         def _bag_pool(ids, emb_layer):
             e = emb_layer(ids)                     # (B, L, D)
@@ -435,19 +444,26 @@ class V4Ultimate(pl.LightningModule):
     def _encode_condition(self, G, B):
         if not self.use_condition:
             return torch.zeros(B, self.hidden_dim, device=self.device)
-        ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph") else torch.full((B, 1), 7.0, device=self.device)
+        _ph = getattr(G, "COND_ph", None)
+        ph = (_ph.to(self.device).float().view(B, 1)
+              if _ph is not None
+              else torch.full((B, 1), 7.0, device=self.device))
         ph_missing = (torch.isnan(ph)).float()
         ph = torch.where(torch.isnan(ph), torch.full_like(ph, 7.0), ph) / 14.0
-        temp = G.COND_temp.to(self.device).float().view(B, 1) if hasattr(G, "COND_temp") else torch.full((B, 1), 25.0, device=self.device)
+        _temp = getattr(G, "COND_temp", None)
+        temp = (_temp.to(self.device).float().view(B, 1)
+                if _temp is not None
+                else torch.full((B, 1), 25.0, device=self.device))
         temp_missing = (torch.isnan(temp)).float()
         temp = torch.where(torch.isnan(temp), torch.full_like(temp, 25.0), temp) / 100.0
         cond = torch.cat([ph, ph_missing, temp, temp_missing], dim=-1)
         return self.cond_proj(cond)
 
     def _encode_ec(self, G, B):
-        if not (self.use_ec and hasattr(G, "EC_ids")):
+        _ec_ids = getattr(G, "EC_ids", None)
+        if not self.use_ec or _ec_ids is None:
             return torch.zeros(B, self.hidden_dim, device=self.device)
-        ec = G.EC_ids.to(self.device)
+        ec = _ec_ids.to(self.device)
         if ec.dim() == 1:
             ec = ec.view(B, 4)
         cat = torch.cat([
@@ -460,9 +476,10 @@ class V4Ultimate(pl.LightningModule):
     # Forward
     # ──────────────────────────────────────────────────────────────
     def forward(self, G):
-        B = G.num_graphs if hasattr(G, "num_graphs") else 1
-        if hasattr(G, "y") and G.y.device != self.device:
-            G.y = G.y.to(self.device)
+        B = getattr(G, "num_graphs", None) or 1
+        _y = getattr(G, "y", None)
+        if _y is not None and _y.device != self.device:
+            G.y = _y.to(self.device)
 
         # Encode all modalities
         _, enz_pool, _ = self._encode_enzyme(G, B)
@@ -556,23 +573,29 @@ class V4Ultimate(pl.LightningModule):
         y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens is not None else torch.zeros(B, 1, device=self.device)
         y_annot  = self.head_annot(annot_emb)  if self.use_annot  else torch.zeros(B, 1, device=self.device)
 
-        # Snapshot pre-output-dropout branch values for diagnostics. The
-        # output-level dropout below zeroes samples on y_rxn / y_struct /
-        # y_int3d / y_annot; logging *before* that gives a clean read on
-        # which branch actually carries signal.
+        # Snapshot pre-output-dropout branch values for diagnostics, along
+        # with each branch's 0/1 input-level mask. `_log_diag` uses the
+        # mask to compute a kept-subset mean so branch magnitudes reflect
+        # eval-time head outputs rather than head(0) on dropped samples.
+        # y_seq / y_sub have no modality dropout, so their masks are the
+        # all-ones identity tensor.
+        ones = torch.ones(B, 1, device=self.device)
         y_pre = {
-            "y_seq":    y_seq.detach(),
-            "y_sub":    y_sub.detach(),
-            "y_rxn":    y_rxn.detach(),
-            "y_int3d":  y_int3d.detach(),
-            "y_struct": y_struct.detach(),
-            "y_annot":  y_annot.detach(),
+            "y_seq":    (y_seq.detach(),    ones),
+            "y_sub":    (y_sub.detach(),    ones),
+            "y_rxn":    (y_rxn.detach(),    mask01_rxn),
+            "y_int3d":  (y_int3d.detach(),  mask01_pocket),
+            "y_struct": (y_struct.detach(), mask01_pocket),
+            "y_annot":  (y_annot.detach(),  mask01_annot),
         }
 
-        # Output-level modality dropout. Heads on zeroed embeddings still
-        # emit the head bias term, so we explicitly zero the y_* contribution
-        # for dropped samples. keep_* is all-ones during inference (see
-        # _keep), so eval metrics are unaffected.
+        # Output-level inverted-scaled dropout. Heads fed zero embeddings
+        # still emit the head bias, so we multiply by the inverted-scaled
+        # `keep_*` (0 for dropped samples, 1/(1-p) for kept). The kept-sample
+        # amplification is what makes E[keep*y] match the eval contribution;
+        # the zero factor suppresses the bias leak from dropped samples.
+        # At eval, `_masks` returns all-ones for both `mask01_*` and `keep_*`,
+        # so these multiplications are identity.
         y_rxn    = y_rxn    * keep_rxn
         y_struct = y_struct * keep_pocket
         y_int3d  = y_int3d  * keep_pocket
@@ -663,11 +686,15 @@ class V4Ultimate(pl.LightningModule):
                      on_step=False, on_epoch=True,
                      sync_dist=True, batch_size=B)
 
-        # Branch magnitudes (mean |y_*|) on the PRE-dropout branch outputs,
-        # so the "which branch dominates" read is not confounded with the
-        # modality-dropout survival probability.
-        for name, t in y_pre.items():
-            _log(f"{name}_abs", t.abs().mean())
+        # Branch magnitudes on the kept subset per modality. For modalities
+        # without dropout (y_seq / y_sub) mask is all-ones and this reduces
+        # to a plain mean. For dropped samples the head was fed a zero
+        # embedding, so including them would underestimate the true branch
+        # magnitude; restricting to the kept subset gives an unbiased read.
+        for name, (t, m01) in y_pre.items():
+            w = m01.float()
+            denom = w.sum().clamp(min=1.0)
+            _log(f"{name}_abs", (t.abs() * w).sum() / denom)
 
         # Gate means — tells you how much each branch is actually mixed in
         _log("g_pair_mean",   g_pair.detach().mean())
@@ -793,18 +820,20 @@ class V4Ultimate(pl.LightningModule):
         if stage == "train" and G is not None:
             y_clean = y_true.float().squeeze(-1)
             rw_enz = self.config["model"].get("rank_loss_weight", 0.0)
-            if rw_enz > 0.0 and hasattr(G, "SEQ_seq_id"):
+            seq_ids = getattr(G, "SEQ_seq_id", None)
+            if rw_enz > 0.0 and seq_ids is not None:
                 rl, _, _ = self._pairwise_ranking(
-                    y_pred, y_clean, G.SEQ_seq_id,
+                    y_pred, y_clean, seq_ids,
                     margin=self.config["model"].get("rank_margin_enzyme", 0.1),
                     min_diff=self.config["model"].get("rank_min_diff_enzyme", 0.1),
                     max_pairs=self.config["model"].get("rank_max_pairs_enzyme", 16),
                 )
                 loss = loss + rw_enz * rl
             rw_sub = self.config["model"].get("rank_loss_substrate_weight", 0.0)
-            if rw_sub > 0.0 and hasattr(G, "MOL_smi_id"):
+            smi_ids = getattr(G, "MOL_smi_id", None)
+            if rw_sub > 0.0 and smi_ids is not None:
                 rl, _, _ = self._pairwise_ranking(
-                    y_pred, y_clean, G.MOL_smi_id,
+                    y_pred, y_clean, smi_ids,
                     margin=self.config["model"].get("rank_margin_substrate", 0.1),
                     min_diff=self.config["model"].get("rank_min_diff_substrate", 0.1),
                     max_pairs=self.config["model"].get("rank_max_pairs_substrate", 16),

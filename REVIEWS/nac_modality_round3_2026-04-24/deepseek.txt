@@ -1,0 +1,12 @@
+**Verification of round-2 fixes:**
+
+- **Fix A (split mask):** Correct. `mask01` (0/1) applied at embed/token level without scaling; `keep` (inverted) applied only at output. E[output_contribution_train] = E[y * mask01 * (1/(1-p))] = y_eval * (1-p) * (1/(1-p)) = y_eval. ✓
+- **Fix A (y_pre diagnostics):** `y_pre` populated from `y_*` BEFORE output-level `keep_*` multiplication, so values match eval-time magnitudes (kept samples, no scaling from mask01). ✓
+- **Fix B (hasattr → getattr):** All 4 claimed sites replaced: `MOL_rxn_center` (line 336), `MOL_graph_xyz`/`MOL_graph_xyz_valid` (line 538-539), `ANNOT_has_any`/`ANNOT_has_cof` (line 599-600). No remaining `hasattr` + `.to()` pattern in forward path. ✓
+- **Fix C (dim synchronization):** `pair_in` = hidden_dim + (hidden_dim if use_substrate) + (hidden_dim if use_rxn_drfp) + (hidden_dim if use_ec). Forward list: `[enz_fused]` + `[graph_emb]` if use_substrate + `[rxn_emb]` if use_rxn_drfp + `[ec_emb]` if use_ec. Matches. ✓
+- **Fix C (struct_in):** `struct_in` = 2*hidden_dim + 3 + (hidden_dim if use_substrate) + (hidden_dim if use_ec). Forward list: `[enz_fused]` + `[graph_emb]` if use_substrate + `[pocket_pool, quality]` + `[ec_emb]` if use_ec. Matches. ✓
+- **No regressions:** Broadcasting `mask01_pocket.unsqueeze(-1)` (B,1,1) × pocket_tokens (B,K,D) correct. All y_* shapes (B,1) compatible with keep_* (B,1). ✓
+
+**No bugs found.**
+
+**APPROVED**

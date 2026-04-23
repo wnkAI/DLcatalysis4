@@ -1,0 +1,7 @@
+Loaded cached credentials.
+* `src/model/v4_ultimate.py`, lines 302, 361, 374, 416, 438, 441, 448, 464
+  - **Description**: Fix B missed 8 remaining `hasattr` checks in the forward path for optional attributes (`SEQ_seq_padding_mask`, `RXN_drfp`, `POCKET_node_s`, `ANNOT_ipr_ids`, `COND_ph`, `COND_temp`, `EC_ids`, `y`).
+  - **Why it matters**: If upstream batching or dataloader code sets these optional attributes to `None` instead of omitting them, `hasattr` will evaluate to `True` and the immediate subsequent access (e.g., `.to(...)`, `.shape`, or `.device`) will crash with an `AttributeError`, reproducing the exact L1 runtime bug.
+  - **Suggested fix**: Replace `hasattr(G, "X")` with `getattr(G, "X", None) is not None` at all 8 of these missed call sites.
+
+BLOCK

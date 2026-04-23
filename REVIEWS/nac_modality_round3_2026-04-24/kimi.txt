@@ -1,0 +1,1269 @@
+--- Logging error in Loguru Handler #1 ---
+Record was: {'elapsed': datetime.timedelta(seconds=2, microseconds=673720), 'exception': None, 'extra': {'session_id': 'e8d96e31-858e-4723-bd33-a1680b377988'}, 'file': (name='__init__.py', path='C:\\Users\\wnkfr\\AppData\\Roaming\\uv\\tools\\kimi-cli\\Lib\\site-packages\\kimi_cli\\cli\\__init__.py'), 'function': '_run', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 524, 'message': 'Created new session: e8d96e31-858e-4723-bd33-a1680b377988', 'module': '__init__', 'name': 'kimi_cli.cli', 'process': (id=122416, name='MainProcess'), 'thread': (id=111160, name='MainThread'), 'time': datetime(2026, 4, 24, 0, 18, 49, 115406, tzinfo=datetime.timezone(datetime.timedelta(seconds=3600), 'GMT 夏令时'))}
+Traceback (most recent call last):
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_handler.py", line 206, in emit
+    self._sink.write(str_record)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_file_sink.py", line 204, in write
+    self._terminate_file(is_rotating=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\wnkfr\AppData\Roaming\uv\tools\kimi-cli\Lib\site-packages\loguru\_file_sink.py", line 276, in _terminate_file
+    os.rename(old_path, renamed_path)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Users\\wnkfr\\.kimi\\logs\\kimi.log' -> 'C:\\Users\\wnkfr\\.kimi\\logs\\kimi.2026-04-18_07-28-43_901007.log'
+--- End of logging error ---
+• The user wants me to:
+
+  1. Read BRIEF.md and diff.patch in REVIEWS/nac_modality_round3_2026-04-24/
+  2. Read src/model/v4_ultimate.py
+  3. Verify specific round-2 fixes:
+    • (A) split dropout mask
+    • (B) getattr None guards in forward path
+    • (C) conditional graph_emb in gates
+  4. Focus on:
+    • (1) any remaining hasattr-into-.to() crash sites
+    • (2) pair_in/struct_in dim synchronization
+    • (3) new bugs in the mask split
+  5. End with APPROVED/NEEDS_WORK/BLOCK
+
+  Let me read the files in parallel.
+• Used ReadFile (REVIEWS/nac_modality_round3_2026-04-24/BRIEF.md)
+• Used ReadFile (REVIEWS/nac_modality_round3_2026-04-24/diff.patch)
+• Used ReadFile (src/model/v4_ultimate.py)
+• Now I need to verify the round-2 fixes against the actual code. Let me go thr
+  ough each fix systematically.
+
+  Fix A: Split dropout mask
+
+  • In forward(), _masks(p) returns (mask01, keep_inv)
+  • mask01 is 0/1, keep_inv is mask01 / (1-p)
+  • At embed level: rxn_emb = rxn_emb * mask01_rxn (no scaling) ✓
+  • At token level: pocket_tokens = pocket_tokens * mask01_pocket.unsqueeze(-1)
+    no scaling) ✓
+  • At output level: y_rxn = y_rxn * keep_rxn, etc. (inverted scaling) ✓
+  • y_pre is captured BEFORE output-level dropout ✓
+  • Math check: E[output] = p(drop) * 0 + p(keep) * (y * 1/(1-p)) = (1-p) * y/(
+    p) = y. ✓
+  • Need to check: does y_pre correctly represent eval-time magnitudes? Yes, be
+    use mask01 is 0/1, so kept samples are unscaled at embed/token level, and y
+    re is before output scaling. ✓
+  • Wait, y_sub is NOT multiplied by any keep/mask01. Looking at output-level:
+    ly y_rxn, y_struct, y_int3d, y_annot get dropout. y_sub does NOT get modali
+    dropout! Is this intentional? Let me re-read...
+    • y_sub corresponds to substrate branch. The substrate branch has graph_emb
+      ch is the substrate embedding. But the mask variables are mask01_rxn, mas
+      pocket, mask01_annot. There's no mask for substrate!
+    • Wait, looking at the code: mask01_rxn is for reaction (drfp), mask01_pock
+      or pocket, mask01_annot for annotation. Substrate (graph_emb) is not subj
+      to modality dropout in this code.
+    • Is this a bug? The BRIEF mentions "rxn / pocket / annot branches". It doe
+      mention substrate. The original code had keep_rxn, keep_pocket, keep_anno
+      no substrate mask either. So this is not a new bug from the split, it's p
+      xisting. But wait — the diff shows the old code also only had these three
+      e BRIEF says "Per-sample Bernoulli dropout of rxn / pocket / annot branch
+      So substrate was never in the dropout plan. OK, not a new bug.
+
+  Fix B: getattr None guards The BRIEF says the 4 sites are:
+
+  1. MOL_rxn_center — in _encode_substrate, line 337: _rxn_center = getattr(G,
+     L_rxn_center", None) ✓
+  2. MOL_graph_xyz — in forward, line 536: _mol_xyz = getattr(G, "MOL_graph_xyz
+     None) ✓
+  3. MOL_graph_xyz_valid — in forward, line 537: _mol_xyz_valid = getattr(G, "M
+     graph_xyz_valid", None) ✓
+  4. ANNOT_has_any — in forward, line 600: _annot_any = getattr(G, "ANNOT_has_a
+     , None) ✓
+  5. ANNOT_has_cof — in forward, line 601: _annot_cof = getattr(G, "ANNOT_has_c
+     , None) ✓
+
+  Wait, the BRIEF says 4 call sites, but I count 5 attributes. Actually the BRI
+  EF says: "MOL_rxn_center, MOL_graph_xyz, MOL_graph_xyz_valid, ANNOT_has_any,
+  ANNOT_has_cof" — that's 5 attributes but maybe 4 call sites? No, that's 5 att
+  ributes across multiple call sites. The fix covers all of them.
+
+  Now I need to check for remaining hasattr calls in the forward path that stil
+  l do .to().
+
+  Let me scan the code for hasattr in forward or called by forward:
+
+  1. Line 302: _encode_enzyme: if not hasattr(G, "SEQ_seq_padding_mask"): — thi
+     s followed by accessing G.SEQ_seq_padding_mask without .to() on the hasatt
+     ine itself, but then .to(self.device) on line 306 on the attribute inside
+     if block. Actually: seq_mask = (~G.SEQ_seq_padding_mask).unsqueeze(-1).flo
+     ).to(self.device). If hasattr passes, the attribute exists and is not None
+     resumably). But if upstream sets it to None, ~None would crash. However, t
+     is in _encode_enzyme, not in the forward path listed in the BRIEF. But wai
+     the BRIEF says "Every forward-path attribute access that used hasattr(G, "
+     and then .to(self.device)". hasattr(G, "SEQ_seq_padding_mask") doesn't dir
+     ly precede a .to() on the same attribute — it's used to guard the whole fu
+     ion body. But could SEQ_seq_padding_mask be None? If so, ~None would crash
+     side. This pattern is different from the specific bug pattern (hasattr pas
+     because attribute exists but is None, then .to() crashes). But let me chec
+     ore carefully.
+  2. Line 316: _encode_substrate: or not hasattr(G, "MOL_graph_x") — inside thi
+     if hasattr passes but value is None, line 317 checks G.MOL_graph_x is None
+     o it's safe. ✓
+  3. Line 361: _encode_rxn: if not self.use_rxn_drfp or not hasattr(G, "RXN_drf
+     : — if hasattr passes, line 363 does G.RXN_drfp.to(self.device). If upstre
+     sets RXN_drfp = None, hasattr returns True, and .to() crashes. This is the
+     act same bug pattern!
+  4. Line 374: _encode_pocket: if not self.use_pocket or not hasattr(G, "POCKET
+     de_s"): — if hasattr passes but value is None, line 378 does G.POCKET_node
+     to(self.device). Same bug pattern!
+  5. Line 416: _encode_annot: if not self.use_annot or not hasattr(G, "ANNOT_ip
+     ds"): — if hasattr passes but value is None, line 419 does G.ANNOT_ipr_ids
+     (self.device). Same bug pattern!
+  6. Line 438: _encode_condition: G.COND_ph.to(self.device).float().view(B, 1)
+     hasattr(G, "COND_ph") — same pattern! If COND_ph exists but is None, .to()
+     ashes.
+  7. Line 441: _encode_condition: G.COND_temp.to(self.device).float().view(B, 1
+     f hasattr(G, "COND_temp") — same pattern.
+  8. Line 448: _encode_ec: if not (self.use_ec and hasattr(G, "EC_ids")): — sam
+     attern. If EC_ids exists but is None, line 450 does G.EC_ids.to(self.devic
+
+  So there are MANY remaining hasattr crash sites in the encoder functions that
+  weren't fixed. The BRIEF specifically said "the fix was only claimed for 4 si
+  tes; were any missed?" — and indeed many were missed.
+
+  Wait, but the BRIEF says "Fix B. Every forward-path attribute access that use
+  d hasattr(G, "X") and then .to(self.device) should now use getattr(..., None)
+  ; if _x is not None: _x.to(...)." But looking at the diff, only 5 specific si
+  tes were changed (the ones mentioned in round-2 findings). All the others rem
+  ain.
+
+  Now, are these encoder functions part of the "forward path"? Yes, they are ca
+  lled from forward(). So they are in the forward path.
+
+  Fix C: conditional graph_emb in gates In __init__:
+
+  • pair_in = self.hidden_dim (enz)
+  • + hidden_dim if use_substrate
+  • + hidden_dim if use_rxn_drfp
+  • + hidden_dim if use_ec
+
+  In forward:
+
+  • pair_gate_in = [enz_fused]
+  • append(graph_emb) if use_substrate
+  • append(rxn_emb) if use_rxn_drfp
+  • append(ec_emb) if use_ec
+
+  This matches perfectly. ✓
+
+  For struct_in in __init__:
+
+  • struct_in = self.hidden_dim * 2 + 3 (enz + pocket + quality[3])
+  • + hidden_dim if use_substrate
+  • + hidden_dim if use_ec
+
+  In forward:
+
+  • struct_in = [enz_fused]
+  • append(graph_emb) if use_substrate
+  • extend([pocket_pool, quality])
+  • append(ec_emb) if use_ec
+
+  This matches perfectly. ✓
+
+  Check the specific case from BRIEF: use_substrate=False, use_pocket=True, use
+  _rxn_drfp=False, use_ec=False:
+
+  • pair_in = hidden_dim (enz only) ✓
+  • struct_in = 2*hidden_dim + 3 (enz + pocket + quality) ✓
+  • Forward pair_gate_in = [enz_fused] ✓
+  • Forward struct_in = [enz_fused, pocket_pool, quality] → dim = hidden_dim +
+    dden_dim + 3 = 2*hidden_dim + 3 ✓
+
+  Focus items:
+
+  (1) Any remaining hasattr-into-.to() crash sites? Yes, many:
+
+  • _encode_rxn line 361: hasattr(G, "RXN_drfp") then G.RXN_drfp.to(...)
+  • _encode_pocket line 374: hasattr(G, "POCKET_node_s") then G.POCKET_node_s.t
+    ...)
+  • _encode_annot line 416: hasattr(G, "ANNOT_ipr_ids") then G.ANNOT_ipr_ids.to
+    ..)
+  • _encode_condition lines 438, 441: hasattr(G, "COND_ph") then G.COND_ph.to(.
+    ); hasattr(G, "COND_temp") then G.COND_temp.to(...)
+  • _encode_ec line 448: hasattr(G, "EC_ids") then G.EC_ids.to(...)
+  • _encode_enzyme line 302: hasattr(G, "SEQ_seq_padding_mask") then G.SEQ_seq_
+    dding_mask used with ~ operator — if None, crashes with ~None (TypeError)
+
+  (2) pair_in/struct_in dim synchronization This is correct. Already verified a
+  bove. ✓
+
+  (3) New bugs in the mask split
+
+  • pocket_tokens = pocket_tokens * mask01_pocket.unsqueeze(-1) — mask01_pocket
+    s (B, 1), .unsqueeze(-1) makes (B, 1, 1). pocket_tokens is (B, K, D). Broad
+    sting works. ✓
+  • rxn_emb = rxn_emb * mask01_rxn — both (B, hidden_dim)? Wait, mask01_rxn is
+    , 1). rxn_emb is (B, hidden_dim). Broadcasting works. ✓
+  • Same for pocket_pool, annot_emb. ✓
+  • Output level: y_rxn is (B, 1), keep_rxn is (B, 1). OK. y_struct is (B, 1),
+    ep_pocket is (B, 1). OK. y_int3d is (B, 1), keep_pocket is (B, 1). OK. y_an
+    t is (B, 1), keep_annot is (B, 1). OK.
+
+  Wait, y_int3d uses keep_pocket not keep_rxn. That's because int3d depends on
+  both pocket and substrate. The old code also used keep_pocket for y_int3d. Lo
+  oking at diff:
+
+  -        y_int3d  = y_int3d  * keep_pocket
+
+  Yes, unchanged. Not a new bug.
+
+  One thing: in the old code, y_struct and y_int3d both used keep_pocket. That
+  makes sense because both depend on the pocket branch. But wait — y_int3d also
+  depends on substrate (atom_tokens). If pocket is dropped but substrate is pre
+  sent, y_int3d gets zeroed because pocket_tokens are zeroed. That's correct be
+  cause int3d requires both. But what if substrate is dropped? There's no mask
+  for substrate, so atom_tokens would still flow through. The pocket dropout ze
+  roes pocket_tokens at token level, so int3d cross-attn would see zero pocket
+  side, making int3d output basically just the pocket bias (or whatever the hea
+  d does on zeroed p_pool_int). This seems intentional and unchanged from befor
+  e.
+
+  Wait, I should double-check the _encode_enzyme hasattr issue. Line 302:
+
+  if not hasattr(G, "SEQ_seq_padding_mask"):
+      z = torch.zeros(B, self.hidden_dim, device=self.device)
+      return None, z, None
+  max_len = G.SEQ_seq_padding_mask.shape[1]
+  seq_mask = (~G.SEQ_seq_padding_mask).unsqueeze(-1).float().to(self.device)
+
+  If G.SEQ_seq_padding_mask exists but is None, hasattr returns True, then G.SE
+  Q_seq_padding_mask.shape[1] raises AttributeError: 'NoneType' object has no a
+  ttribute 'shape'. This is a crash. Is this the same bug pattern? Yes, basical
+  ly. It's not exactly .to() but it's an attribute access on None. The BRIEF sa
+  ys "hasattr still used in forward path for ..." and mentions .to() crashes sp
+  ecifically, but the root cause is the same: hasattr returns True when attribu
+  te is None.
+
+  Let me also check _encode_substrate:
+
+  if (not self.use_substrate
+          or not hasattr(G, "MOL_graph_x")
+          or G.MOL_graph_x is None):
+
+  This one is actually safe because it checks is None after hasattr. But it's i
+  nconsistent style. Not a crash though.
+
+  Wait, in _log_diag, lines 699-701:
+
+  annot_any = getattr(G, "ANNOT_has_any", None)
+  if annot_any is not None:
+      _log("cov_annot", annot_any.float().mean())
+
+  This uses getattr correctly. But what about lines 705-707:
+
+  mol_xyz_valid = getattr(G, "MOL_graph_xyz_valid", None)
+  if mol_xyz_valid is not None:
+      _log("cov_mol_xyz", mol_xyz_valid.float().mean())
+
+  This is fine.
+
+  Now let me check the _encode_condition more carefully:
+
+  ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph") el
+  se torch.full((B, 1), 7.0, device=self.device)
+
+  If COND_ph exists but is None: hasattr returns True, .to() crashes. This need
+  s fixing.
+
+  Also _encode_rxn:
+
+  if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+      return torch.zeros(B, self.hidden_dim, device=self.device)
+  drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+
+  Same issue.
+
+  _encode_pocket:
+
+  if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+      return (None, ..., None, None, None)
+  node_s = G.POCKET_node_s.to(self.device).float()
+
+  Same issue.
+
+  _encode_annot:
+
+  if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+      return torch.zeros(...)
+  ipr_ids = G.ANNOT_ipr_ids.to(self.device).view(B, -1)
+
+  Same issue.
+
+  _encode_ec:
+
+  if not (self.use_ec and hasattr(G, "EC_ids")):
+      return torch.zeros(...)
+  ec = G.EC_ids.to(self.device)
+
+  Same issue.
+
+  _encode_enzyme:
+
+  if not hasattr(G, "SEQ_seq_padding_mask"):
+      ...
+  max_len = G.SEQ_seq_padding_mask.shape[1]
+
+  Same issue if None.
+
+  Are there any other forward-path hasattr calls?
+
+  • forward line 463: B = G.num_graphs if hasattr(G, "num_graphs") else 1 — num
+    raphs is a PyG property, usually always present. No .to() after.
+  • forward line 464: if hasattr(G, "y") and G.y.device != self.device: — if G.
+    is None, G.y.device crashes. But y is the target label, typically always pr
+    ent in training/val.
+  • get_loss line 796: hasattr(G, "SEQ_seq_id") — used in _pairwise_ranking, no
+    to() directly after.
+  • get_loss line 805: hasattr(G, "MOL_smi_id") — same.
+
+  So the remaining crash sites in the forward path (encoders called by forward)
+  are:
+
+  1. _encode_enzyme line 302: hasattr(G, "SEQ_seq_padding_mask") → G.SEQ_seq_pa
+     ng_mask.shape[1] (if None, AttributeError)
+  2. _encode_rxn line 361: hasattr(G, "RXN_drfp") → G.RXN_drfp.to(...)
+  3. _encode_pocket line 374: hasattr(G, "POCKET_node_s") → G.POCKET_node_s.to(
+     )
+  4. _encode_annot line 416: hasattr(G, "ANNOT_ipr_ids") → G.ANNOT_ipr_ids.to(.
+  5. _encode_condition line 438: hasattr(G, "COND_ph") → G.COND_ph.to(...)
+  6. _encode_condition line 441: hasattr(G, "COND_temp") → G.COND_temp.to(...)
+  7. _encode_ec line 448: hasattr(G, "EC_ids") → G.EC_ids.to(...)
+
+  Also in _encode_pocket, there are multiple attributes accessed after the init
+  ial hasattr guard:
+
+  • G.POCKET_node_v, G.POCKET_edge_index, G.POCKET_edge_s, G.POCKET_edge_v, G.P
+    KET_num_nodes, G.POCKET_ca_xyz — if any of these are None, they'll crash. B
+    the hasattr on POCKET_node_s is meant to gate the whole function. If any of
+    he others are None, it would crash regardless. The issue is specifically th
+    hasattr returns True when the attribute is None.
+
+  Also in _encode_pocket, G.POCKET_node_v.to(...) etc. — if POCKET_node_v is No
+  ne, crash. But this is a different issue from the hasattr-None pattern; it's
+  just missing data.
+
+  Wait, actually the BRIEF specifically says "hasattr still used in forward pat
+  h for MOL_rxn_center, MOL_graph_xyz, MOL_graph_xyz_valid, ANNOT_has_any, ANNO
+  T_has_cof". The round-2 fix replaced those. But the instruction says "Look fo
+  r remaining hasattr calls in the forward path that still have the old pattern
+  (the fix was only claimed for 4 sites; were any missed?)."
+
+  So I should report these missed sites.
+
+  Is there anything else? Let me re-read the diff patch carefully.
+
+  Wait, in the diff patch, around line 468 (old line numbers), the old code had
+  :
+
+  rxn_center_dense = None
+  if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
+      from torch_geometric.utils import to_dense_batch
+      center_flag_long = G.MOL_rxn_center.to(self.device).long()
+
+  And it was replaced with getattr. ✓
+
+  In forward (old lines 511+):
+
+  if hasattr(G, "MOL_graph_xyz") and hasattr(G, "MOL_graph_xyz_valid") \
+          and bool(G.MOL_graph_xyz_valid.any().item()):
+
+  Replaced with getattr. ✓
+
+  And around old line 559:
+
+  has_annot_flag = (G.ANNOT_has_any.to(self.device).view(B, 1)
+                    if hasattr(G, "ANNOT_has_any")
+
+  Replaced with getattr. ✓
+
+  So the 5 attributes mentioned are fixed. But many others remain.
+
+  Now, the user's instruction: "Focus on: (1) any remaining hasattr-into-.to()
+  crash sites, (2) pair_in/struct_in dim synchronization, (3) new bugs in the m
+  ask split."
+
+  (2) is good. (3) no new bugs in mask split. (1) many remaining crash sites.
+
+  Let me check if any of these are "false positives" — i.e., attributes that up
+  stream code would never set to None.
+
+  • SEQ_seq_padding_mask: Upstream could potentially set it to None for samples
+    ithout sequence data.
+  • RXN_drfp: Could be None if no reaction fingerprint.
+  • POCKET_node_s: Could be None if no pocket.
+  • ANNOT_ipr_ids: Could be None if no annotations.
+  • COND_ph, COND_temp: Could be None if condition missing.
+  • EC_ids: Could be None if EC missing.
+
+  All of these are optional modalities, so they could reasonably be None.
+
+  One more thing: _encode_substrate line 316:
+
+  if (not self.use_substrate
+          or not hasattr(G, "MOL_graph_x")
+          or G.MOL_graph_x is None):
+
+  This is actually safe because it checks is None. But it's inconsistent. Not a
+  crash, but inconsistent style.
+
+  Also in _encode_pocket, line 374:
+
+  if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+
+  If POCKET_node_s exists and is not None, but POCKET_node_v is None (line 387)
+  , it would crash. However, this is a data completeness issue, not the specifi
+  c hasattr-None pattern.
+
+  Now let me think about whether there are any issues with the pair_in / struct
+  _in conditional logic in __init__ vs forward.
+
+  In __init__:
+
+  pair_in = self.hidden_dim        # enz_pool always present
+  if self.use_substrate:
+      pair_in += self.hidden_dim   # graph_emb
+  if self.use_rxn_drfp:
+      pair_in += self.hidden_dim
+  if self.use_ec:
+      pair_in += self.hidden_dim
+
+  In forward:
+
+  pair_gate_in = [enz_fused]
+  if self.use_substrate:
+      pair_gate_in.append(graph_emb)
+  if self.use_rxn_drfp:
+      pair_gate_in.append(rxn_emb)
+  if self.use_ec:
+      pair_gate_in.append(ec_emb)
+  g_pair = self.gate_pair(torch.cat(pair_gate_in, dim=-1))
+
+  Wait — what if self.use_substrate is True but graph_emb is a zero tensor beca
+  use _encode_substrate returned zeros (e.g., no substrate data)? In that case,
+  graph_emb still has the right shape (B, hidden_dim), so torch.cat works. And
+  the gate was built with pair_in including hidden_dim for graph. So dims match
+  . ✓
+
+  Same for struct_in: pocket_pool might be zeros if no pocket data, but use_poc
+  ket is True, so struct_in includes pocket dim, and pocket_pool has shape (B,
+  hidden_dim). ✓
+
+  One more thing: what about use_pocket=False but use_int3d=True? In __init__,
+  gate_struct is only created if use_pocket. In forward:
+
+  y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens
+  is not None else torch.zeros(B, 1, device=self.device)
+  ...
+  if self.use_pocket:
+      ...
+      g_struct = torch.sigmoid(self.gate_struct(torch.cat(struct_in, dim=-1)))
+  else:
+      g_struct = torch.zeros(B, 1, device=self.device)
+
+  If use_pocket=False, g_struct is zeros, so g_struct * y_struct = 0. This is f
+  ine. But y_int3d can still be non-zero if use_int3d=True and pocket_tokens is
+  not None... wait:
+
+  if self.use_int3d and pocket_tokens is not None and atom_tokens is not None a
+  nd pocket_mask is not None:
+
+  If use_pocket=False, _encode_pocket returns (None, zeros, None, None, None),
+  so pocket_tokens is None. Thus y_int3d will be zeros. So that's consistent. N
+  ot a new bug.
+
+  Wait, but use_int3d=True and use_pocket=True but pocket data missing for some
+  samples: _encode_pocket returns None for tokens, so pocket_tokens is None, an
+  d y_int3d is skipped. That's correct.
+
+  Let me check if there's a subtle issue with y_sub not having output-level dro
+  pout. The old code had:
+
+  y_sub = ...
+
+  And there was no y_sub = y_sub * keep_something. Looking at the diff, there w
+  as never a keep mask for substrate. The old code only had:
+
+  y_rxn    = y_rxn    * keep_rxn
+  y_struct = y_struct * keep_pocket
+  y_int3d  = y_int3d  * keep_pocket
+  y_annot  = y_annot  * keep_annot
+
+  And the new code has the same but with keep_*. So y_sub was never masked. Is
+  this a bug? The BRIEF says "Per-sample Bernoulli dropout of rxn / pocket / an
+  not branches". It doesn't mention substrate. So it's intentional. But wait —
+  rxn_emb is masked at embed level with mask01_rxn, and graph_emb is not masked
+  at all with mask01. So substrate is never dropped. This seems inconsistent bu
+  t it's pre-existing.
+
+  Actually wait — looking more carefully at the old code (diff context):
+
+  # Embed-level: gates can't see a dropped modality
+  rxn_emb     = rxn_emb     * keep_rxn
+  pocket_pool = pocket_pool * keep_pocket
+  annot_emb   = annot_emb   * keep_annot
+
+  The old code also didn't mask graph_emb. So substrate was never dropped. This
+  is not a new bug.
+
+  However, the new code masks rxn_emb at embed level with mask01_rxn (0/1), and
+  at output level with keep_rxn (inverted). So for rxn: embed sees 0 or origina
+  l, output sees 0 or scaled. For substrate: embed sees original always, output
+  sees original always. This means substrate is always fully active. Is this th
+  e intended behavior? It seems so, since the config only specifies dropout for
+  rxn/pocket/annot.
+
+  Let me think about whether there's any issue with keep_rxn being used for y_r
+  xn when use_rxn_drfp=False. In that case, y_rxn is zeros (line 527-529), and
+  y_rxn = y_rxn * keep_rxn is still zeros. No problem. And rxn_emb is zeros fro
+  m _encode_rxn (line 361-362), so rxn_emb = rxn_emb * mask01_rxn is zeros. pai
+  r_gate_in doesn't append rxn_emb when use_rxn_drfp=False. So gate dim is corr
+  ect.
+
+  Wait — what if use_rxn_drfp=True but rxn_emb is zeros because data is missing
+  ? Then mask01_rxn might randomly drop some samples, and keep_rxn will scale t
+  he rest. That's correct.
+
+  One more thing: the _masks function:
+
+  def _masks(p):
+      if (not self.training) or p <= 0.0:
+          ones = torch.ones(B, 1, device=self.device)
+          return ones, ones
+      mask01 = (torch.rand(B, 1, device=self.device) >= float(p)).float()
+      keep_inv = mask01 / max(1.0 - float(p), 1e-6)
+      return mask01, keep_inv
+
+  This is correct. At eval, both are all-ones.
+
+  Is there any issue with B not matching actual batch size? B = G.num_graphs if
+  hasattr(G, "num_graphs") else 1. For PyG Batch, num_graphs is the number of g
+  raphs in the batch. This is correct.
+
+  Wait, what if G.num_graphs doesn't exist and B=1, but the actual batch has mu
+  ltiple samples? G.num_graphs is standard in PyG. If it's missing, something i
+  s wrong. But this is pre-existing.
+
+  Let me also check _encode_enzyme hasattr more carefully:
+
+  if not hasattr(G, "SEQ_seq_padding_mask"):
+      z = torch.zeros(B, self.hidden_dim, device=self.device)
+      return None, z, None
+  max_len = G.SEQ_seq_padding_mask.shape[1]
+  seq_mask = (~G.SEQ_seq_padding_mask).unsqueeze(-1).float().to(self.device)
+
+  If SEQ_seq_padding_mask exists but is None, hasattr returns True, then G.SEQ_
+  seq_padding_mask.shape[1] raises AttributeError: 'NoneType' object has no att
+  ribute 'shape'. This is indeed the same class of bug, though the crash is on
+  .shape rather than .to().
+
+  Wait, the user's request specifically says "Focus on: (1) any remaining hasat
+  tr-into-.to() crash sites". The .shape crash is related but not exactly hasat
+  tr-into-.to(). Should I report it? The BRIEF says "hasattr still used in forw
+  ard path for ..." and mentions .to() crashes, but the root cause is hasattr w
+  ith None values. I think I should report all hasattr guards in the forward pa
+  th that don't also check for None.
+
+  Actually, _encode_enzyme line 302: hasattr(G, "SEQ_seq_padding_mask") — if No
+  ne, ~None crashes. But ~None is a TypeError, not an AttributeError from .to()
+  . The user specifically asks for "hasattr-into-.to() crash sites". So I shoul
+  d focus on .to() crashes. But _encode_enzyme doesn't have .to() on the same l
+  ine; it has .shape. So it's a different crash pattern. Still worth mentioning
+  ? Maybe. But the user said "Focus on: (1) any remaining hasattr-into-.to() cr
+  ash sites". Let me stick to that pattern.
+
+  But wait, forward line 464:
+
+  if hasattr(G, "y") and G.y.device != self.device:
+      G.y = G.y.to(self.device)
+
+  If G.y exists but is None, G.y.device raises AttributeError: 'NoneType' objec
+  t has no attribute 'device'. This is also a crash. But it's not .to() immedia
+  tely after hasattr. It's .device. Should I report it? It's in the forward pat
+  h. But the user asks specifically for "hasattr-into-.to() crash sites". I'll
+  focus on that.
+
+  Let me identify all hasattr followed by .to() in the forward path (including
+  called functions):
+
+  1. _encode_rxn line 361-363: hasattr(G, "RXN_drfp") → G.RXN_drfp.to(self.devi
+  2. _encode_pocket line 374-378: hasattr(G, "POCKET_node_s") → G.POCKET_node_s
+     (self.device)
+    • Also lines 387-390: G.POCKET_node_v.to(...), G.POCKET_edge_index.to(...),
+      . But these are after the initial hasattr check. If POCKET_node_s exists,
+      sumably the others exist too. But if any are None, they crash.
+  3. _encode_annot line 416-419: hasattr(G, "ANNOT_ipr_ids") → G.ANNOT_ipr_ids.
+     self.device)
+  4. _encode_condition line 438: hasattr(G, "COND_ph") → G.COND_ph.to(self.devi
+  5. _encode_condition line 441: hasattr(G, "COND_temp") → G.COND_temp.to(self.
+     ice)
+  6. _encode_ec line 448-450: hasattr(G, "EC_ids") → G.EC_ids.to(self.device)
+
+  Wait, _encode_pocket has hasattr(G, "POCKET_node_s") but then uses many other
+  attributes. The .to() on POCKET_node_s is the first one. But then G.POCKET_no
+  de_v.to(...) at line 387, G.POCKET_edge_index.to(...) at 388, etc. These don'
+  t have hasattr guards individually. If upstream sets any of these to None, it
+  crashes. But the primary gate is hasattr(G, "POCKET_node_s"). If POCKET_node_
+  s exists and is not None, but POCKET_node_v is None, it crashes on line 387.
+  Is this the same bug? Partially — it's missing None guards, but not specifica
+  lly hasattr returning True on None. The instruction is about hasattr-into-.to
+  () crash sites, meaning hasattr passes but the value is None and .to() crashe
+  s.
+
+  For _encode_pocket, the hasattr is on POCKET_node_s, and .to() is called on i
+  t. If POCKET_node_s is None, crash. That's one site. For the other pocket att
+  ributes (POCKET_node_v, etc.), there's no hasattr guard, so it's a different
+  pattern (missing guard entirely). But if POCKET_node_s is None, the function
+  returns early (line 375), so the other .to() calls are never reached. The onl
+  y way to reach them is if POCKET_node_s is not None. So for those attributes,
+  the crash would be because they are None while POCKET_node_s is not None, whi
+  ch is a data consistency issue, not the hasattr bug.
+
+  Similarly for _encode_annot: hasattr(G, "ANNOT_ipr_ids") guards the function.
+  If it passes, then G.ANNOT_pf_ids and G.ANNOT_go_ids are used directly (lines
+  420-421). If any of those are None, crash. But again, that's data consistency
+  .
+
+  Let me count the exact hasattr → .to() crash sites:
+
+  1. _encode_rxn: hasattr(G, "RXN_drfp") then G.RXN_drfp.to(...)
+  2. _encode_pocket: hasattr(G, "POCKET_node_s") then G.POCKET_node_s.to(...)
+  3. _encode_annot: hasattr(G, "ANNOT_ipr_ids") then G.ANNOT_ipr_ids.to(...)
+  4. _encode_condition line 438: hasattr(G, "COND_ph") then G.COND_ph.to(...)
+  5. _encode_condition line 441: hasattr(G, "COND_temp") then G.COND_temp.to(..
+  6. _encode_ec: hasattr(G, "EC_ids") then G.EC_ids.to(...)
+
+  That's 6 distinct sites.
+
+  Also, _encode_enzyme has hasattr(G, "SEQ_seq_padding_mask") but the crash wou
+  ld be on .shape, not .to(). I'll mention it as a related issue but note it's
+  not exactly .to().
+
+  Wait, I should also check _log_diag. It uses getattr correctly for ANNOT_has_
+  any, ANNOT_has_cof, MOL_graph_xyz_valid. But line 694: drfp = getattr(G, "RXN
+  _drfp", None) then drfp.view(B, -1).abs().sum(dim=-1) > 0. If drfp is None, .
+  view() crashes. But _log_diag is only called when _trainer is not None. And t
+  he getattr is correct. But wait, drfp could be None, and then drfp.view(...)
+  would crash. However, line 695 checks if drfp is not None:. Yes:
+
+  drfp = getattr(G, "RXN_drfp", None)
+  if drfp is not None:
+      _log("cov_rxn_drfp", (drfp.view(B, -1).abs().sum(dim=-1) > 0).float().mea
+  n())
+
+  So it's safe. ✓
+
+  Now, are there any issues with the diff itself? The patch applies cleanly and
+  the logic is correct for the parts it touches.
+
+  One thing about Fix C: In __init__, the old code had:
+
+  pair_in = self.hidden_dim * 2   # enz_pool + graph_emb
+
+  This assumed use_substrate=True always. The new code:
+
+  pair_in = self.hidden_dim        # enz_pool always present
+  if self.use_substrate:
+      pair_in += self.hidden_dim   # graph_emb
+
+  This is correct. But what if use_substrate=False and use_rxn_drfp=False and u
+  se_ec=False? Then pair_in = hidden_dim. The gate is nn.Linear(pair_in, hidden
+  _dim). In forward, pair_gate_in = [enz_fused]. This is fine.
+
+  For struct_in, old code:
+
+  struct_in = self.hidden_dim * 3 + 3   # enz + graph + pocket + (n_res, has_an
+  not, has_cof)
+
+  Wait, old comment said enz + graph + pocket + (n_res, has_annot, has_cof) whi
+  ch is hidden_dim * 3 + 3. But the comment in the diff context says "enz + gra
+  ph + pocket + (n_res, has_annot, has_cof)". The new code:
+
+  struct_in = self.hidden_dim * 2 + 3   # enz + pocket + quality
+  if self.use_substrate:
+      struct_in += self.hidden_dim      # graph_emb
+  if self.use_ec:
+      struct_in += self.hidden_dim
+
+  This correctly handles use_substrate=False.
+
+  But wait, the old code had * 3 + 3 which included graph_emb unconditionally.
+  That was the bug. The fix correctly makes it conditional. ✓
+
+  Let me think about whether there's any issue with g_struct not being wrapped
+  in nn.Sigmoid() in __init__:
+
+  self.gate_struct = nn.Sequential(
+      nn.Linear(struct_in, self.hidden_dim),
+      nn.LeakyReLU(),
+      nn.Linear(self.hidden_dim, 1),
+  )
+
+  And in forward:
+
+  g_struct = torch.sigmoid(self.gate_struct(torch.cat(struct_in, dim=-1)))
+
+  This is correct — sigmoid is applied in forward, not in the Sequential. Same
+  as before. ✓
+
+  Similarly for gate_annot:
+
+  self.gate_annot = nn.Sequential(
+      nn.Linear(annot_gate_in, self.hidden_dim),
+      nn.LeakyReLU(),
+      nn.Linear(self.hidden_dim, 1),
+  )
+
+  And in forward:
+
+  g_annot = torch.sigmoid(self.gate_annot(torch.cat([enz_fused, annot_emb], dim
+  =-1)))
+
+  Correct. ✓
+
+  Now, are there any issues with pair_gate_in when use_substrate=False but grap
+  h_emb is still computed? In forward:
+
+  atom_tokens, graph_emb, atom_mask, rxn_center_dense = \
+      self._encode_substrate(G, B)
+
+  _encode_substrate returns graph_emb as zeros when use_substrate=False (line 3
+  18). So graph_emb exists but is zeros. Then:
+
+  pair_gate_in = [enz_fused]
+  if self.use_substrate:
+      pair_gate_in.append(graph_emb)
+
+  So graph_emb is not appended. The gate gets only enz_fused. This matches pair
+  _in = hidden_dim in __init__. ✓
+
+  Similarly for struct_in:
+
+  struct_in = [enz_fused]
+  if self.use_substrate:
+      struct_in.append(graph_emb)
+  struct_in.extend([pocket_pool, quality])
+
+  If use_substrate=False, graph_emb (zeros) is not included. This matches __ini
+  t__. ✓
+
+  What about y_sub when use_substrate=False?
+
+  y_sub = (self.head_sub(graph_emb)
+           if self.use_substrate
+           else torch.zeros(B, 1, device=self.device))
+
+  Wait, if use_substrate=False, self.head_sub might not exist! Looking at __ini
+  t__:
+
+  if self.use_substrate:
+      self.head_sub    = _mkhead(self.hidden_dim)
+
+  So if use_substrate=False, self.head_sub doesn't exist. The ternary self.head
+  _sub(graph_emb) if self.use_substrate else ... correctly avoids calling it. ✓
+
+  But what if use_substrate=True but graph_emb is zeros (no substrate data)? se
+  lf.head_sub exists and is called with zeros. That's fine. ✓
+
+  Wait, I just noticed: _encode_substrate line 318 returns z = torch.zeros(B, s
+  elf.hidden_dim, device=self.device). But if B is computed as G.num_graphs, an
+  d _encode_substrate is called with G and B, that's fine. But what if G.num_gr
+  aphs doesn't exist and B=1 from forward, but the actual batch has more sample
+  s? In forward:
+
+  B = G.num_graphs if hasattr(G, "num_graphs") else 1
+
+  If G.num_graphs doesn't exist, B=1. But then _encode_substrate receives B=1.
+  If the actual tensor G.MOL_graph_x has more graphs... wait, num_graphs is a p
+  roperty of PyG Batch. If it's missing, G might not be a PyG Batch but a singl
+  e Data. In that case, B=1 is correct. So this is fine.
+
+  One more thing: in _encode_pocket, line 398:
+
+  ca_xyz = G.POCKET_ca_xyz.to(self.device).float()
+
+  This is after the hasattr(G, "POCKET_node_s") check. If POCKET_node_s exists
+  but POCKET_ca_xyz is None, this crashes. But this is data consistency, not th
+  e hasattr bug.
+
+  Wait, I should check: is there any hasattr followed by .to() in _encode_pocke
+  t specifically for POCKET_ca_xyz? No. So it's not part of the specific bug pa
+  ttern.
+
+  Let me now check if there are any issues in _encode_condition:
+
+  ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph") el
+  se torch.full((B, 1), 7.0, device=self.device)
+
+  If hasattr is False, it uses default 7.0. If hasattr is True but value is Non
+  e, crash. This is the bug.
+
+  The fix should be:
+
+  _cond_ph = getattr(G, "COND_ph", None)
+  ph = _cond_ph.to(self.device).float().view(B, 1) if _cond_ph is not None else
+  torch.full((B, 1), 7.0, device=self.device)
+
+  Same for COND_temp.
+
+  For _encode_rxn:
+
+  if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+      return torch.zeros(B, self.hidden_dim, device=self.device)
+  drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+
+  Fix:
+
+  _drfp = getattr(G, "RXN_drfp", None)
+  if not self.use_rxn_drfp or _drfp is None:
+      return torch.zeros(B, self.hidden_dim, device=self.device)
+  drfp = _drfp.to(self.device).float().view(B, -1)
+
+  For _encode_pocket:
+
+  if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+      return (None, ..., None, None, None)
+  node_s = G.POCKET_node_s.to(self.device).float()
+
+  Fix:
+
+  _node_s = getattr(G, "POCKET_node_s", None)
+  if not self.use_pocket or _node_s is None:
+      return (None, ..., None, None, None)
+  node_s = _node_s.to(self.device).float()
+
+  And similarly for the other attributes? Actually if _node_s is not None, but
+  POCKET_node_v is None, then line 387 crashes. But that's a separate issue of
+  partial data. The primary hasattr bug is on POCKET_node_s.
+
+  For _encode_annot:
+
+  if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+      return torch.zeros(...)
+  ipr_ids = G.ANNOT_ipr_ids.to(self.device).view(B, -1)
+
+  Fix:
+
+  _ipr_ids = getattr(G, "ANNOT_ipr_ids", None)
+  if not self.use_annot or _ipr_ids is None:
+      return torch.zeros(...)
+  ipr_ids = _ipr_ids.to(self.device).view(B, -1)
+
+  For _encode_ec:
+
+  if not (self.use_ec and hasattr(G, "EC_ids")):
+      return torch.zeros(...)
+  ec = G.EC_ids.to(self.device)
+
+  Fix:
+
+  _ec_ids = getattr(G, "EC_ids", None)
+  if not (self.use_ec and _ec_ids is not None):
+      return torch.zeros(...)
+  ec = _ec_ids.to(self.device)
+
+  For _encode_enzyme:
+
+  if not hasattr(G, "SEQ_seq_padding_mask"):
+      ...
+  max_len = G.SEQ_seq_padding_mask.shape[1]
+
+  Fix:
+
+  _seq_mask = getattr(G, "SEQ_seq_padding_mask", None)
+  if _seq_mask is None:
+      ...
+  max_len = _seq_mask.shape[1]
+
+  But again, the crash here is .shape, not .to().
+
+  Now let me check if forward line 464 is a crash site:
+
+  if hasattr(G, "y") and G.y.device != self.device:
+      G.y = G.y.to(self.device)
+
+  If G.y is None, G.y.device crashes. This is hasattr → .device → then .to(). N
+  ot exactly the pattern, but related. I'll mention it briefly.
+
+  Actually, looking back at the BRIEF: "Fix B. Every forward-path attribute acc
+  ess that used hasattr(G, "X") and then .to(self.device) should now use getatt
+  r(..., None); if _x is not None: _x.to(...)."
+
+  So the user is specifically looking for this pattern. I should report the one
+  s I found.
+
+  Now let me organize my findings:
+
+  Severity 1 (BLOCK or high): Multiple remaining hasattr → .to() crash sites in
+  encoder helpers called by forward. These will crash at runtime if upstream se
+  ts any optional attribute to None instead of omitting it.
+
+  Severity 2 (medium): _encode_enzyme hasattr(G, "SEQ_seq_padding_mask") follow
+  ed by .shape access — crashes if None.
+
+  Severity 3 (low/info): forward line 464 hasattr(G, "y") followed by .device a
+  ccess — crashes if G.y is None.
+
+  But wait, the round-2 fixes are supposed to fix the specific issues found in
+  round-1. The BRIEF asks me to verify the round-2 fixes. The round-2 fix list
+  only claimed to fix 4 specific sites. I need to verify those specific fixes a
+  re correct, and then also check for remaining issues.
+
+  The 3 specific fixes (A, B, C) are all correct and don't introduce new bugs i
+  n the mask split or gate dims. But Fix B left many similar crash sites unfixe
+  d.
+
+  So my verdict should be: The claimed fixes are correct, but there are remaini
+  ng crash sites. Is this NEEDS_WORK or BLOCK? Since there are multiple runtime
+  crash sites that would cause training/inference to fail under certain data co
+  nditions, this is at least NEEDS_WORK. It could be BLOCK if the crashes are h
+  ighly likely. Given that upstream code "may set the attribute to None instead
+  of omitting it" (as noted in the diff comments), these crashes are quite like
+  ly. So I think NEEDS_WORK is appropriate, or possibly BLOCK if we consider it
+  a severe regression that the fix was incomplete.
+
+  Wait, the BRIEF says "Your job: verify the round-2 fixes are correct and didn
+  't introduce new bugs." The round-2 fixes themselves are correct. But the use
+  r also asked to focus on "any remaining hasattr-into-.to() crash sites". So f
+  inding them is part of the job.
+
+  I think the verdict should be NEEDS_WORK because the claimed fixes are correc
+  t but incomplete — there are remaining crash sites that need to be fixed befo
+  re the code is robust.
+
+  Let me double-check one more time for any issues I might have missed.
+
+  Wait, in _encode_substrate:
+
+  if (not self.use_substrate
+          or not hasattr(G, "MOL_graph_x")
+          or G.MOL_graph_x is None):
+      z = torch.zeros(B, self.hidden_dim, device=self.device)
+      return None, z, None, None
+
+  This is safe. But what about G.MOL_graph_num_nodes on line 320? If MOL_graph_
+  x is not None but MOL_graph_num_nodes is None, line 320 crashes. However, has
+  attr on MOL_graph_x is meant to guard the whole substrate branch. If MOL_grap
+  h_num_nodes is None, that's a data bug. Not the specific hasattr pattern.
+
+  In _encode_pocket, after the initial hasattr check on POCKET_node_s, all thes
+  e are accessed:
+
+  • G.POCKET_node_v (line 387)
+  • G.POCKET_edge_index (line 388)
+  • G.POCKET_edge_s (line 389)
+  • G.POCKET_edge_v (line 390)
+  • G.POCKET_num_nodes (line 391)
+  • G.POCKET_ca_xyz (line 398)
+
+  If any of these are None, crash. But the only hasattr guard is on POCKET_node
+  _s. So if POCKET_node_s exists and is not None, but POCKET_node_v is None, cr
+  ash. This is a missing guard, but not the hasattr bug pattern.
+
+  Actually, wait. Looking at _encode_pocket lines 378-398:
+
+  node_s = G.POCKET_node_s.to(self.device).float()
+  ...
+  node_v = G.POCKET_node_v.to(self.device).float()
+  edge_index = G.POCKET_edge_index.to(self.device).long()
+  edge_s = G.POCKET_edge_s.to(self.device).float()
+  edge_v = G.POCKET_edge_v.to(self.device).float()
+  num_nodes = G.POCKET_num_nodes.to(self.device).view(-1)
+  ...
+  ca_xyz = G.POCKET_ca_xyz.to(self.device).float()
+
+  None of these have individual hasattr or getattr guards. They all assume that
+  if POCKET_node_s exists, the rest exist too. This is a data contract assumpti
+  on. The round-2 review didn't claim to fix this, so I won't flag it as a miss
+  ed fix unless it's part of the hasattr pattern.
+
+  But POCKET_node_s specifically: hasattr(G, "POCKET_node_s") then G.POCKET_nod
+  e_s.to(...) — this IS the pattern. So I'll flag it.
+
+  Similarly for _encode_annot: hasattr(G, "ANNOT_ipr_ids") then G.ANNOT_ipr_ids
+  .to(...). But then G.ANNOT_pf_ids and G.ANNOT_go_ids are used without individ
+  ual guards. Again, data contract assumption.
+
+  Similarly for _encode_rxn: only one attribute.
+
+  Similarly for _encode_ec: only one attribute.
+
+  Similarly for _encode_condition: two attributes, each with their own hasattr
+  guard.
+
+  OK, I think I have a clear picture.
+
+  One more thing: y_pre diagnostic values. The BRIEF says "Verify y_pre values
+  match the eval-time magnitudes (kept samples, since mask01 didn't scale them)
+  ." Since mask01 is 0/1 and doesn't scale, the embeddings that go into the hea
+  ds are at eval magnitude for kept samples. The heads see the same magnitude i
+  nput at train and eval for kept samples. y_pre is captured before output-leve
+  l keep_* scaling. So y_pre shows the head output at eval magnitude. This is c
+  orrect. At eval, keep_* is all-ones, so y_* after output level equals y_pre.
+  At train, y_pre is the unscaled head output, while the actual contribution is
+  y_pre * keep_*. So diagnostics show eval-time magnitudes. This matches the BR
+  IEF requirement. ✓
+
+  Wait, but what about y_struct and y_int3d? Both use keep_pocket at output lev
+  el. The head outputs y_struct and y_int3d from pocket_pool and pocket_tokens
+  respectively. At embed/token level, pocket_pool and pocket_tokens are masked
+  with mask01_pocket (0/1). For kept samples, they are unscaled. The heads prod
+  uce outputs at eval magnitude. y_pre captures these before output-level scali
+  ng. So yes, y_pre matches eval magnitude for kept samples. ✓
+
+  For y_rxn: rxn_emb is masked with mask01_rxn (0/1, no scaling). Kept samples
+  are unscaled. Head output is eval magnitude. y_pre captures before keep_rxn.
+  ✓
+
+  For y_annot: same. ✓
+
+  For y_seq: no dropout at all. y_pre = y_seq. ✓
+
+  For y_sub: no dropout at all. y_pre = y_sub. ✓
+
+  All good.
+
+  One more check: pocket_tokens = pocket_tokens * mask01_pocket.unsqueeze(-1).
+  mask01_pocket is (B, 1). .unsqueeze(-1) makes it (B, 1, 1). pocket_tokens is
+  (B, K, D). Broadcasting: (B, K, D) * (B, 1, 1) = (B, K, D). For each sample b
+  , if mask01_pocket[b, 0] == 0, all K tokens are zeroed. If 1, all K tokens ar
+  e preserved. This is correct. ✓
+
+  Wait, but what if pocket_tokens is not None but pocket_mask is also used late
+  r? pocket_mask is (B, K) boolean. The int3d cross-attn uses pocket_mask to ma
+  sk padded positions. If pocket_tokens is zeroed by mask01_pocket, the cross-a
+  ttn still sees the padding mask. That's fine — zeroed tokens plus padding mas
+  k is correct.
+
+  Also, pocket_pool = pocket_pool * mask01_pocket. pocket_pool is (B, hidden_di
+  m). mask01_pocket is (B, 1). Broadcasts correctly. ✓
+
+  annot_emb = annot_emb * mask01_annot. annot_emb is (B, hidden_dim). mask01_an
+  not is (B, 1). Broadcasts correctly. ✓
+
+  rxn_emb = rxn_emb * mask01_rxn. rxn_emb is (B, hidden_dim). mask01_rxn is (B,
+  1). Broadcasts correctly. ✓
+
+  All broadcast shapes are correct.
+
+  Now let me write the response. It should be terse, bulleted list ordered by s
+  everity, each item with file + line, 1-sentence description, why it matters,
+  suggested fix. End with APPROVED/NEEDS_WORK/BLOCK.
+
+  I found:
+
+  • 6 remaining hasattr → .to() crash sites in encoder helpers
+  • 1 hasattr → .shape crash site in _encode_enzyme
+  • 1 hasattr → .device crash site in forward
+
+  Since the user asked to "Focus on: (1) any remaining hasattr-into-.to() crash
+  sites", I'll list the .to() ones first, then mention the .shape/.device ones
+  as related.
+
+  Actually, should I include the .shape/.device ones? The user said "Focus on:
+  (1) any remaining hasattr-into-.to() crash sites". I'll stick to that primari
+  ly, but also mention the .shape one briefly since it's the same root cause. T
+  he .device one in forward is minor.
+
+  Wait, I want to be precise. The _encode_enzyme one is hasattr → .shape, not .
+  to(). But it's the same class of bug. I'll mention it as a related issue.
+
+  Let me structure it:
+
+  • src/model/v4_ultimate.py:361 — _encode_rxn uses hasattr(G, "RXN_drfp") then
+    .RXN_drfp.to(...); if upstream sets attribute to None, .to() crashes. Repla
+    with getattr(..., None) guard.
+  • src/model/v4_ultimate.py:374 — _encode_pocket uses hasattr(G, "POCKET_node_
+    ) then G.POCKET_node_s.to(...); None value crashes. Replace with getattr(..
+    None) guard.
+  • src/model/v4_ultimate.py:416 — _encode_annot uses hasattr(G, "ANNOT_ipr_ids
+    then G.ANNOT_ipr_ids.to(...); None value crashes. Replace with getattr(...,
+    one) guard.
+  • src/model/v4_ultimate.py:438 — _encode_condition uses hasattr(G, "COND_ph")
+    hen G.COND_ph.to(...); None value crashes. Replace with getattr(..., None)
+    ard.
+  • src/model/v4_ultimate.py:441 — _encode_condition uses hasattr(G, "COND_temp
+    then G.COND_temp.to(...); None value crashes. Replace with getattr(..., Non
+    guard.
+  • src/model/v4_ultimate.py:448 — _encode_ec uses hasattr(G, "EC_ids") then G.
+    _ids.to(...); None value crashes. Replace with getattr(..., None) guard.
+  • src/model/v4_ultimate.py:302 — _encode_enzyme uses hasattr(G, "SEQ_seq_padd
+    g_mask") then .shape; if None, AttributeError on .shape. Same root cause. R
+    lace with getattr(..., None) guard.
+
+  Wait, line numbers in the file might differ from diff line numbers. Let me ve
+  rify exact line numbers in v4_ultimate.py.
+
+  From ReadFile output:
+
+  • _encode_rxn: line 360-363
+    def _encode_rxn(self, G, B):
+      if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+          return torch.zeros(B, self.hidden_dim, device=self.device)
+      drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+    So line 361.
+  • _encode_pocket: line 373-378
+    def _encode_pocket(self, G, B):
+      if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+          return (None,
+                  torch.zeros(B, self.hidden_dim, device=self.device),
+                  None, None, None)
+      node_s = G.POCKET_node_s.to(self.device).float()
+    So line 374.
+  • _encode_annot: line 415-419
+    def _encode_annot(self, G, B):
+      if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+          return torch.zeros(B, self.hidden_dim, device=self.device)
+      ipr_ids = G.ANNOT_ipr_ids.to(self.device).view(B, -1)
+    So line 416.
+  • _encode_condition: line 437-438
+    ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph")
+    se torch.full((B, 1), 7.0, device=self.device)
+    Wait, looking at the code:
+    def _encode_condition(self, G, B):
+      if not self.use_condition:
+          return torch.zeros(B, self.hidden_dim, device=self.device)
+      ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph"
+    ) else torch.full((B, 1), 7.0, device=self.device)
+    So line 438.
+  • Line 441:
+    temp = G.COND_temp.to(self.device).float().view(B, 1) if hasattr(G, "COND_t
+    p") else torch.full((B, 1), 25.0, device=self.device)
+  • _encode_ec: line 447-450
+    def _encode_ec(self, G, B):
+      if not (self.use_ec and hasattr(G, "EC_ids")):
+          return torch.zeros(B, self.hidden_dim, device=self.device)
+      ec = G.EC_ids.to(self.device)
+    So line 448.
+  • _encode_enzyme: line 302
+    def _encode_enzyme(self, G, B):
+      if not hasattr(G, "SEQ_seq_padding_mask"):
+          z = torch.zeros(B, self.hidden_dim, device=self.device)
+          return None, z, None
+      max_len = G.SEQ_seq_padding_mask.shape[1]
+    So line 302.
+
+  I should also check forward line 464:
+
+  if hasattr(G, "y") and G.y.device != self.device:
+
+  Line 464.
+
+  Now, are there any new bugs introduced by the diff? I don't see any. The mask
+  split math is correct. The gate dim sync is correct.
+
+  So my verdict: NEEDS_WORK because of the remaining crash sites. The round-2 f
+  ixes themselves are correct, but incomplete.
+
+  Wait, I should check if pair_gate_in and struct_in forward lists are missing
+  ec_emb condition in any edge case. Looking at __init__:
+
+  pair_in = self.hidden_dim        # enz_pool always present
+  if self.use_substrate:
+      pair_in += self.hidden_dim   # graph_emb
+  if self.use_rxn_drfp:
+      pair_in += self.hidden_dim
+  if self.use_ec:
+      pair_in += self.hidden_dim
+
+  Forward:
+
+  pair_gate_in = [enz_fused]
+  if self.use_substrate:
+      pair_gate_in.append(graph_emb)
+  if self.use_rxn_drfp:
+      pair_gate_in.append(rxn_emb)
+  if self.use_ec:
+      pair_gate_in.append(ec_emb)
+
+  Matches. ✓
+
+  struct_in in __init__:
+
+  struct_in = self.hidden_dim * 2 + 3   # enz + pocket + quality
+  if self.use_substrate:
+      struct_in += self.hidden_dim      # graph_emb
+  if self.use_ec:
+      struct_in += self.hidden_dim
+
+  Forward:
+
+  struct_in = [enz_fused]
+  if self.use_substrate:
+      struct_in.append(graph_emb)
+  struct_in.extend([pocket_pool, quality])
+  if self.use_ec:
+      struct_in.append(ec_emb)
+
+  Matches. ✓
+
+  What about the use_pocket=False case? In __init__, gate_struct is only create
+  d if use_pocket. In forward, struct_in list is only built if use_pocket. So g
+  ate_struct always exists when used. ✓
+
+  One more thought: _encode_enzyme uses hasattr but doesn't use .to() on the sa
+  me attribute in the guard line. It uses .shape and .to() on derived expressio
+  ns. Is this "hasattr-into-.to()"? Not exactly. But it's the same bug. I'll me
+  ntion it as a related issue.
+
+  Actually, re-reading the user's request: "Focus on: (1) any remaining hasattr
+  -into-.to() crash sites, (2) pair_in/struct_in dim synchronization, (3) new b
+  ugs in the mask split."
+
+  So (2) and (3) are clean. (1) has issues.
+
+  I'll present the findings concisely.
+
+  Let me also verify one more thing: in _encode_substrate, the old code had has
+  attr(G, "MOL_rxn_center") which was fixed. But MOL_graph_x still uses hasattr
+  on line 316:
+
+  if (not self.use_substrate
+          or not hasattr(G, "MOL_graph_x")
+          or G.MOL_graph_x is None):
+
+  This is safe because of the explicit is None check. But if G.MOL_graph_x exis
+  ts and is not None, then line 325 does G.MOL_graph_x.to(self.device). If MOL_
+  graph_x exists and is not None, it's fine. But what about G.MOL_graph_edge_in
+  dex on line 326? If MOL_graph_x is not None but MOL_graph_edge_index is None,
+  crash. But that's not the hasattr bug pattern.
+
+  OK, I'm ready to write the response.
+• • src/model/v4_ultimate.py:361 — _encode_rxn uses hasattr(G, "RXN_drfp") then
+    .RXN_drfp.to(...); if upstream sets the attribute to None, hasattr passes a
+    .to() crashes. Replace with getattr(G, "RXN_drfp", None) and an is not None
+    uard.
+  • src/model/v4_ultimate.py:374 — _encode_pocket uses hasattr(G, "POCKET_node_
+    ) then G.POCKET_node_s.to(...) on the next line; a None value causes an Att
+    buteError. Replace with getattr(..., None) and an is not None guard.
+  • src/model/v4_ultimate.py:416 — _encode_annot uses hasattr(G, "ANNOT_ipr_ids
+    then G.ANNOT_ipr_ids.to(...); a None value crashes. Replace with getattr(..
+    None) and an is not None guard.
+  • src/model/v4_ultimate.py:438 — _encode_condition ternary hasattr(G, "COND_p
+    ) immediately precedes G.COND_ph.to(...); a None value crashes. Replace wit
+    getattr(..., None) guard.
+  • src/model/v4_ultimate.py:441 — _encode_condition ternary hasattr(G, "COND_t
+    p") immediately precedes G.COND_temp.to(...); a None value crashes. Replace
+    ith getattr(..., None) guard.
+  • src/model/v4_ultimate.py:448 — _encode_ec uses hasattr(G, "EC_ids") then G.
+    _ids.to(...); a None value crashes. Replace with getattr(..., None) and an
+    not None guard.
+  • src/model/v4_ultimate.py:302 — _encode_enzyme uses hasattr(G, "SEQ_seq_padd
+    g_mask") then accesses .shape on the next line; if the attribute is None, A
+    ributeError follows. Same root cause as the .to() crashes.
+  Fix A (mask split): Verified correct — mask01 is 0/1 at embed/token levels, k
+  eep applies inverted scaling once at output, y_pre is captured before output
+  dropout so diagnostics reflect eval-time magnitudes. No broadcasting errors;
+  shapes (B,1), (B,1,1), and (B,K,D) line up.
+  Fix C (conditional gate dims): Verified correct — pair_in/struct_in in __init
+  __ and pair_gate_in/struct_in in forward stay perfectly in sync for all flag
+  combinations. For use_substrate=False, use_pocket=True, use_rxn_drfp=False, u
+  se_ec=False, pair_in=hidden_dim and struct_in=2*hidden_dim+3, matching the fo
+  rward concatenation lists.
+  New bugs in mask split: None found.
+
+  NEEDS_WORK

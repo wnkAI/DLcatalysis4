@@ -1,0 +1,363 @@
+OpenAI Codex v0.116.0 (research preview)
+--------
+workdir: E:\AImodel\DLcatalysis4.0
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbca3-26cd-7f42-83c5-e914371a1f95
+--------
+user
+Verify round-2 fixes from the brief. Terse. Bugs only. End with APPROVED/NEEDS_WORK/BLOCK.
+mcp startup: no servers
+codex
+Reviewing the round-2 changes against the brief first, then I’ll inspect the touched files for regressions and missed fixes.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Where-Object { $_.Name -match '"'brief|round-2|round2|fix' } | Select-Object -ExpandProperty FullName" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n --hidden -S "round-2|round 2|brief|fixes" .' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git status --short' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-ChildItem -Recurse -File | Where-Object { $_.Name -match '"'brief|round-2|round2|fix' } | Select-Object -ExpandProperty FullName"` rejected: blocked by policy
+ succeeded in 514ms:
+?? REVIEWS/nac_modality_round3_2026-04-24/
+ succeeded in 717ms:
+.\.git\COMMIT_EDITMSG:1:/five round-2 fixes: split dropout mask + complete None guards + gate dims
+.\.git\COMMIT_EDITMSG:3:Round-2 review flagged 3 issues on the round-1 fix commit (69d1f94):
+.\scripts\04_resolve_smiles.py:36:STOP_PREFIXES = ["racemic ", "rac-", "(±)-", "(+/-)-", "(+)-", "(-)-"]
+.\scripts\04_resolve_smiles.py:48:    for p in STOP_PREFIXES:
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:18:• Used ReadFile (REVIEWS/nac_modality_2026-04-23/BRIEF.md)
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:109:      s at least 23 columns. The brief says pocket features node_s shape is (K,
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:349:    • The brief says cols 0..19 = AA one-hot. So index 18 is valid. Fine.
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:358:      nostics run during train/val/test as long as trainer exists. The BRIEF sa
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:518:      Wait, the BRIEF says:
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:554:        ropout. But the BRIEF doesn't say ablation configs need dropout. If the
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:591:    ot), then node_s[:, 21] will raise IndexError. But the brief says shape is
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:642:    crash bug. The BRIEF says diagnostics are there to catch issues. It might n
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:836:  • The BRIEF mentions: "Any new key added to the model must also be declared i
+.\REVIEWS\nac_modality_2026-04-23\kimi.txt:881:  Actually, the brief says: "cols 0..19 = AA one-hot (STANDARD_AA order in scri
+.\REVIEWS\nac_modality_2026-04-23\codex.txt:13:Read the review brief and diff below. Report bugs only, in the format the brief requests. Stay terse, no preamble.
+.\REVIEWS\nac_modality_2026-04-23\codex.txt:16:Reviewing the brief and patch context first so I can report only concrete bugs in the requested format. After that I’ll inspect the changed code paths and verify any behavioral regressions against surrounding code.
+.\REVIEWS\nac_modality_2026-04-23\codex.txt:19:"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n --hidden --glob '"'!**/.git/**'"' \"review brief|Review brief|brief|diff\" ." in E:\AImodel\DLcatalysis4.0 succeeded in 567ms:
+.\REVIEWS\nac_modality_2026-04-23\codex.txt:62:I found the review package under `REVIEWS/nac_modality_2026-04-23`. Next I’m reading the brief and the modified model/config files to isolate only user-visible regressions or correctness issues.
+.\REVIEWS\nac_modality_2026-04-23\codex.txt:66:"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_2026-04-23\\BRIEF.md" in E:\AImodel\DLcatalysis4.0exec
+.\REVIEWS\nac_modality_2026-04-23\codex.txt:68:# /five review brief 鈥?v4-ultimate NAC bias + modality dropout + diagnostics + ablation
+codex
+I found the round-3 review package and the target commit id. Next I’m reading the brief plus the round-2 patch itself to verify each claimed fix and check for any new breakage nearby.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round3_2026-04-24\\BRIEF.md" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show --stat --oneline 702fedc' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git log --oneline --decorate -n 5' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'git show 702fedc --' in E:\AImodel\DLcatalysis4.0 succeeded in 493ms:
+702fedc /five round-2 fixes: split dropout mask + complete None guards + gate dims
+ REVIEWS/nac_modality_round2_2026-04-24/BRIEF.md    |   81 +
+ REVIEWS/nac_modality_round2_2026-04-24/codex.txt   |  400 ++
+ .../nac_modality_round2_2026-04-24/deepseek.txt    |   29 +
+ REVIEWS/nac_modality_round2_2026-04-24/diff.patch  | 4055 ++++++++++++++++++++
+ REVIEWS/nac_modality_round2_2026-04-24/gemini.txt  |   12 +
+ REVIEWS/nac_modality_round2_2026-04-24/kimi.txt    |   23 +
+ src/model/v4_ultimate.py                           |  120 +-
+ 7 files changed, 4679 insertions(+), 41 deletions(-)
+ succeeded in 482ms:
+702fedc (HEAD -> master) /five round-2 fixes: split dropout mask + complete None guards + gate dims
+69d1f94 /five round-1 fixes: 10 bugs from NAC + modality dropout review
+18345ef v4-ultimate: NAC bias in int3d cross-attn + training-time modality dropout
+4f88914 (origin/master) v4-ultimate: diagnostics + ablation matrix + per-file audit
+3309c17 Fix 4 issues found in reviewer audit (2026-04-23)
+ succeeded in 517ms:
+# /five round-3 brief 鈥?verify round-2 fixes
+
+Round-2 review of commit `69d1f94` (round-1 fixes) found 3 issues on
+commit 69d1f94. Commit `702fedc "round-2 fixes"` attempts to fix them.
+Your job: verify the round-2 fixes are correct and didn't introduce
+new bugs.
+
+Repo: `E:/AImodel/DLcatalysis4.0`
+Diff: `REVIEWS/nac_modality_round3_2026-04-24/diff.patch` (185 lines,
+code-only).
+
+## Round-2 fix list
+
+| ID | Round-2 finding | Round-2 fix |
+|----|-----------------|-------------|
+| A  | Inverted dropout mask `keep_*` applied at embed + token + output levels 鈫?compounded scaling, softmax temperature shift in int3d | Split into `mask01` (0/1, used at embed/token) and `keep` (inverted, used only at output) |
+| B  | L1 incomplete 鈥?`hasattr` still used in forward path for `MOL_rxn_center`, `MOL_graph_xyz`, `MOL_graph_xyz_valid`, `ANNOT_has_any`, `ANNOT_has_cof` | Replaced with `getattr(..., None) is not None` at all 4 call sites |
+| C  | `graph_emb` still fed to pair_gate / gate_struct when `use_substrate=False`, wastes parameters | Made `pair_in` / `struct_in` dim computation + forward list construction conditional on `use_substrate` |
+
+## What to check
+ succeeded in 518ms:
+commit 702fedc0097baf65ffdaf458194b0d7daa48457f
+Author: wnkfromwx-create <wnkfromwx@gmail.com>
+Date:   Fri Apr 24 00:17:14 2026 +0100
+
+    /five round-2 fixes: split dropout mask + complete None guards + gate dims
+    
+    Round-2 review flagged 3 issues on the round-1 fix commit (69d1f94):
+    
+    A — compounded dropout scaling (Codex, Gemini, internal Claude)
+      The single inverted `keep_*` was being multiplied at embed-level,
+      token-level, and output-level — so kept samples ended up amplified by
+      1/(1-p) more than once, and the inverted scaling of pocket_tokens was
+      shifting softmax temperature inside int3d cross-attn.
+      Fix: split into two masks per modality. `mask01 in {0,1}` is used for
+      all input / token zeroing (no scaling, just "hide the modality"); the
+      inverted-scaled `keep` is used exactly once, at the output level, so
+      the predicted contribution satisfies E[keep * y] == y_eval.
+    
+    B — L1 fix was incomplete in forward path (Codex, internal Claude)
+      hasattr was still used for MOL_rxn_center, MOL_graph_xyz,
+codex
+The claimed changes are in place. I’m now checking the current forward path for any remaining `hasattr`-with-`.to()` hazards and for dimension mismatches around the substrate-disabled gate paths.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"hasattr\\(|getattr\\(.+, None\\)|pair_in|struct_in|pair_gate_in|modality_dropout|mask01_|keep_|y_pre|MOL_rxn_center|MOL_graph_xyz|ANNOT_has_any|ANNOT_has_cof\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\v4_ultimate.py | Select-Object -Skip 210 -First 420" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\v4_ultimate.py | Select-Object -First 210" in E:\AImodel\DLcatalysis4.0 succeeded in 638ms:
+231:        # pair_in is assembled from whichever branches are enabled, matching
+235:        pair_in = self.hidden_dim        # enz_pool always present
+237:            pair_in += self.hidden_dim   # graph_emb
+239:            pair_in += self.hidden_dim
+241:            pair_in += self.hidden_dim
+243:            nn.Linear(pair_in, self.hidden_dim),
+251:            struct_in = self.hidden_dim * 2 + 3   # enz + pocket + quality
+253:                struct_in += self.hidden_dim      # graph_emb
+255:                struct_in += self.hidden_dim
+257:                nn.Linear(struct_in, self.hidden_dim),
+302:        if not hasattr(G, "SEQ_seq_padding_mask"):
+316:                or not hasattr(G, "MOL_graph_x")
+337:        _rxn_center = getattr(G, "MOL_rxn_center", None)
+361:        if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+374:        if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+416:        if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+438:        ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph") else torch.full((B, 1), 7.0, device=self.device)
+441:        temp = G.COND_temp.to(self.device).float().view(B, 1) if hasattr(G, "COND_temp") else torch.full((B, 1), 25.0, device=self.device)
+448:        if not (self.use_ec and hasattr(G, "EC_ids")):
+463:        B = G.num_graphs if hasattr(G, "num_graphs") else 1
+ succeeded in 802ms:
+"""
+DLcatalysis 4.0 鈥?v4-ultimate (闆嗗ぇ鎴愮増).
+
+    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+
+    Branches:
+      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+      y_int3d  : pocket residue 脳 substrate atom cross-attn + 3D RBF  (interaction)
+      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+
+    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb?, ec?)
+              NOTE: annot_emb is NOT fed into g_pair 鈥?the annotation branch
+              has its own dedicated g_annot (see below). Mixing annot into
+              g_pair would couple the pair-specific residual strength to
+              enzyme annotation availability.
+    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality[3], ec?)
+              quality = [n_res/K, has_active_site鈭╤as_binding_site, has_cofactor]
+ succeeded in 803ms:
+            return MLP(in_dim=in_dim, out_dim=1,
+                       hidden_dim=hdr["hidden_dim"], num_layer=hdr["num_layers"],
+                       norm=hdr["norm_fn"], act_fn=hdr["act_fn"], dropout=self.dropout_rate)
+        self.head_seq    = _mkhead(self.hidden_dim)
+        if self.use_substrate:
+            self.head_sub    = _mkhead(self.hidden_dim)
+        if self.use_rxn_drfp:
+            self.head_rxn    = _mkhead(self.hidden_dim)
+        if self.use_int3d:
+            self.head_int3d  = _mkhead(self.hidden_dim * 2)
+        if self.use_pocket:
+            self.head_struct = _mkhead(self.hidden_dim)
+        if self.use_annot:
+            self.head_annot  = _mkhead(self.hidden_dim)
+        # Aleatoric uncertainty head: log-variance from fused enzyme pool
+        if self.use_uncertainty:
+            self.head_logvar = _mkhead(self.hidden_dim)
+            self._last_log_var = None  # stash for loss access
+
+        # 鈹€鈹€ Gates 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+codex
+I found additional `hasattr(...).to(...)` sites outside the four fixed ones. I’m tracing whether those fields are genuinely optional in the data pipeline or guaranteed present, to separate real bugs from harmless style leftovers.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "COND_ph|COND_temp|EC_ids|RXN_drfp|POCKET_node_s|ANNOT_ipr_ids|SEQ_seq_padding_mask|MOL_graph_x" src scripts data tests' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content REVIEWS\\nac_modality_round3_2026-04-24\\diff.patch" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\model\\v4_ultimate.py | Select-Object -Skip 520 -First 180" in E:\AImodel\DLcatalysis4.0 succeeded in 404ms:
+diff --git a/src/model/v4_ultimate.py b/src/model/v4_ultimate.py
+index 71a08bc..9fceb77 100644
+--- a/src/model/v4_ultimate.py
++++ b/src/model/v4_ultimate.py
+@@ -228,7 +228,13 @@ class V4Ultimate(pl.LightningModule):
+             self._last_log_var = None  # stash for loss access
+ 
+         # 鈹€鈹€ Gates 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+-        pair_in = self.hidden_dim * 2   # enz_pool + graph_emb
++        # pair_in is assembled from whichever branches are enabled, matching
++        # the order the forward pass concatenates them. Same pattern used
++        # for use_rxn_drfp / use_ec; extending it to use_substrate keeps
++        # the gate from carrying a dead W_graph column in A0.
++        pair_in = self.hidden_dim        # enz_pool always present
++        if self.use_substrate:
++            pair_in += self.hidden_dim   # graph_emb
+         if self.use_rxn_drfp:
+             pair_in += self.hidden_dim
+         if self.use_ec:
+@@ -241,7 +247,10 @@ class V4Ultimate(pl.LightningModule):
+ succeeded in 471ms:
+
+        # 鈹€鈹€ Branches 鈹€鈹€
+        y_seq = self.head_seq(enz_fused)
+        y_sub = (self.head_sub(graph_emb)
+                 if self.use_substrate
+                 else torch.zeros(B, 1, device=self.device))
+        y_rxn = (self.head_rxn(rxn_emb)
+                 if self.use_rxn_drfp
+                 else torch.zeros(B, 1, device=self.device))
+
+        # int3d
+        if self.use_int3d and pocket_tokens is not None and atom_tokens is not None and pocket_mask is not None:
+            from torch_geometric.utils import to_dense_batch
+            atom_xyz = None
+            xyz_valid_per_sample = None
+            _mol_xyz = getattr(G, "MOL_graph_xyz", None)
+            _mol_xyz_valid = getattr(G, "MOL_graph_xyz_valid", None)
+            if (_mol_xyz is not None and _mol_xyz_valid is not None
+                    and bool(_mol_xyz_valid.any().item())):
+                num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
+ succeeded in 1.64s:
+src\util\data_module.py:80:        if hasattr(inst, "SEQ_seq_padding_mask"):
+src\util\data_module.py:81:            m = inst.SEQ_seq_padding_mask
+src\util\data_module.py:91:            return self.MOL_graph_x.size(0) if hasattr(self, "MOL_graph_x") else 0
+src\util\data_module.py:93:            return self.POCKET_node_s.size(0) if hasattr(self, "POCKET_node_s") else 0
+src\util\data_module.py:94:        if key in ("MOL_graph_x", "MOL_graph_edge_attr", "MOL_graph_num_nodes",
+src\util\data_module.py:95:                   "MOL_rxn_center", "MOL_graph_xyz", "MOL_graph_xyz_valid"):
+src\util\data_module.py:103:        if key == "EC_ids":
+src\util\data_module.py:396:            data.RXN_drfp = self._load_drfp(self.rxn_smiles[idx]).view(1, -1)  # (1, drfp_dim)
+src\util\data_module.py:406:            data.ANNOT_ipr_ids = annot["ipr_ids"].view(1, -1)
+src\util\data_module.py:420:            data.COND_ph = torch.tensor([[float("nan") if pd.isna(ph) else float(ph)]], dtype=torch.float32)
+src\util\data_module.py:421:            data.COND_temp = torch.tensor([[float("nan") if pd.isna(temp) else float(temp)]], dtype=torch.float32)
+src\util\data_module.py:425:            data.EC_ids = torch.tensor([ec_ids], dtype=torch.long)
+src\model\v4_innovate.py:215:        max_len = G.SEQ_seq_padding_mask.shape[1]
+src\model\v4_innovate.py:216:        seq_mask = (~G.SEQ_seq_padding_mask).unsqueeze(-1).float().to(self.device)
+src\model\v4_innovate.py:223:        if not hasattr(G, "MOL_graph_x") or G.MOL_graph_x is None:
+src\model\v4_innovate.py:231:            x=G.MOL_graph_x.to(self.device),
+src\model\v4_innovate.py:239:        if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+src\model\v4_innovate.py:241:        drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+src\model\v4_innovate.py:245:        if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+src\model\v4_innovate.py:247:        node_s = G.POCKET_node_s.to(self.device).float()
+🌐 Searching the web...
+🌐 Searched the web
+codex
+The dataset code shows some optional fields are omitted, not set to `None`, but I’m checking the custom batching logic too because that can preserve `None` attributes and make the remaining `hasattr` sites still crash.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "= None|None$|setattr'"\\(.+, None\\)|Data\\(\" src\\util\\data_module.py src tests" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\util\\data_module.py | Select-Object -Skip 360 -First 90" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "Get-Content src\\util\\data_module.py | Select-Object -Skip 60 -First 80" in E:\AImodel\DLcatalysis4.0 succeeded in 376ms:
+src\util\data_module.py:66:class SeqMolComplexData(torch_geometric.data.Data):
+src\util\data_module.py:72:        inst = SeqMolComplexData(**kwargs)
+src\util\data_module.py:160:        self.seq_db = None
+src\util\data_module.py:164:        self.mol_graphs = None
+src\util\data_module.py:174:        self.pockets = None
+src\util\data_module.py:181:        self.drfp_by_rxn_id = None
+src\util\data_module.py:196:        self.rxn_center_by_smi_id = None
+src\util\data_module.py:207:        self.annotations = None
+src\util\data_module.py:208:        self.annot_vocab = None
+src\model\ec_cross_attn.py:82:            sub_enz_bias = None
+src\model\ec_cross_attn.py:83:            enz_sub_bias = None
+src\model\int3d_cross_attn.py:97:                xyz_p: Optional[torch.Tensor] = None,
+src\model\int3d_cross_attn.py:98:                xyz_a: Optional[torch.Tensor] = None,
+src\model\int3d_cross_attn.py:99:                xyz_valid_per_sample: Optional[torch.Tensor] = None,
+src\model\int3d_cross_attn.py:100:                p_nac: Optional[torch.Tensor] = None,
+src\model\int3d_cross_attn.py:101:                a_nac: Optional[torch.Tensor] = None):
+src\model\int3d_cross_attn.py:131:            bias = None
+src\model\module.py:109:            self.activation = None
+src\model\module.py:113:            self.dropout = None
+src\model\v4_minimal.py:54:        self._last_test_metrics = None
+ succeeded in 490ms:
+
+        def _pack(id_set, vocab_map):
+            ids = [vocab_map.get(i, 0) for i in id_set]
+            ids = [x for x in ids if x > 0][:K]
+            ids = ids + [0] * (K - len(ids))
+            return torch.tensor(ids, dtype=torch.long)
+
+        ipr_ids = _pack(a.get("interpro_family_ids", set()) | {d[0] for d in a.get("interpro_domain_ranges", [])},
+                        self.annot_vocab["interpro_family"])
+        pf_ids = _pack(a.get("pfam_family_ids", set()), self.annot_vocab["pfam_family"])
+        go_ids = _pack(a.get("go_term_ids", set()), self.annot_vocab["go_term"])
+        return {
+            "ipr_ids": ipr_ids, "pf_ids": pf_ids, "go_ids": go_ids,
+            "has_any_annot":    torch.tensor([float(a.get("has_any_annot", False))], dtype=torch.float32),
+            "has_active_site":  torch.tensor([float(a.get("has_active_site", False))], dtype=torch.float32),
+            "has_binding_site": torch.tensor([float(a.get("has_binding_site", False))], dtype=torch.float32),
+            "has_cofactor":     torch.tensor([float(a.get("has_cofactor", False))], dtype=torch.float32),
+        }
+
+    def __getitem__(self, idx: int):
+ succeeded in 491ms:
+
+
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+# PyG data wrapper
+# 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+class SeqMolComplexData(torch_geometric.data.Data):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def from_dict(sequence=None, molecular=None, **kwargs):
+        inst = SeqMolComplexData(**kwargs)
+        if sequence is not None:
+            for k, v in sequence.items():
+                inst["SEQ_" + k] = v
+        if molecular is not None:
+            for k, v in molecular.items():
+                inst["MOL_" + k] = v
+
+        if hasattr(inst, "SEQ_seq_padding_mask"):
+codex
+I’ve got one concrete diagnostics issue and one concrete “None-guard” gap left. Pulling exact line numbers now so I can keep the final review terse and file/line-specific.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content src'"\\model\\v4_ultimate.py | ForEach-Object { "'$i++; if($i -ge 356 -and $i -le 450){ '"'{0,4}: {1}' -f "'$i, $_ } }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content src'"\\model\\v4_ultimate.py | ForEach-Object { "'$i++; if($i -ge 520 -and $i -le 575){ '"'{0,4}: {1}' -f "'$i, $_ } }' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content src'"\\model\\v4_ultimate.py | ForEach-Object { "'$i++; if($i -ge 520 -and $i -le 575){ '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=0; Get-Content src'"\\model\\v4_ultimate.py | ForEach-Object { "'$i++; if($i -ge 356 -and $i -le 450){ '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"y_struct = self\\.head_struct|y_pre = \\{|which branch actually carries signal|for dropped samples\\. keep_\\*|y_rxn    = y_rxn|y_struct = y_struct|y_int3d  = y_int3d|y_annot  = y_annot\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"if not self.use_rxn_drfp|drfp = G\\.RXN_drfp|if not self.use_pocket|node_s = G\\.POCKET_node_s|if not self.use_annot|ipr_ids = G\\.ANNOT_ipr_ids|ph = G\\.COND_ph|temp = G\\.COND_temp|if not \\(self.use_ec|ec = G\\.EC_ids\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0 succeeded in 359ms:
+361:        if not self.use_rxn_drfp or not hasattr(G, "RXN_drfp"):
+363:        drfp = G.RXN_drfp.to(self.device).float().view(B, -1)
+374:        if not self.use_pocket or not hasattr(G, "POCKET_node_s"):
+378:        node_s = G.POCKET_node_s.to(self.device).float()
+416:        if not self.use_annot or not hasattr(G, "ANNOT_ipr_ids"):
+419:        ipr_ids = G.ANNOT_ipr_ids.to(self.device).view(B, -1)  # (B, max_fam)
+438:        ph = G.COND_ph.to(self.device).float().view(B, 1) if hasattr(G, "COND_ph") else torch.full((B, 1), 7.0, device=self.device)
+441:        temp = G.COND_temp.to(self.device).float().view(B, 1) if hasattr(G, "COND_temp") else torch.full((B, 1), 25.0, device=self.device)
+448:        if not (self.use_ec and hasattr(G, "EC_ids")):
+450:        ec = G.EC_ids.to(self.device)
+ succeeded in 361ms:
+556:        y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens is not None else torch.zeros(B, 1, device=self.device)
+562:        # which branch actually carries signal.
+563:        y_pre = {
+574:        # for dropped samples. keep_* is all-ones during inference (see
+576:        y_rxn    = y_rxn    * keep_rxn
+577:        y_struct = y_struct * keep_pocket
+578:        y_int3d  = y_int3d  * keep_pocket
+579:        y_annot  = y_annot  * keep_annot
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"rxn_emb     = rxn_emb|pocket_pool = pocket_pool|annot_emb   = annot_emb|pocket_tokens = pocket_tokens\" src\\model\\v4_ultimate.py" in E:\AImodel\DLcatalysis4.0 succeeded in 324ms:
+512:        rxn_emb     = rxn_emb     * mask01_rxn
+513:        pocket_pool = pocket_pool * mask01_pocket
+514:        annot_emb   = annot_emb   * mask01_annot
+520:            pocket_tokens = pocket_tokens * mask01_pocket.unsqueeze(-1)
+codex
+- `src/model/v4_ultimate.py:512-520,563-579` `y_pre` is still recorded after the 0/1 embed/token masks are applied, so dropped samples contribute bias-only branch outputs instead of eval-time branch magnitudes. Why it matters: the diagnostics this fix was meant to clean up are still survival-probability-dependent and can understate branch strength or compare branches incorrectly. Suggested fix: snapshot diagnostics from the unmasked branch path, or compute/log branch magnitudes only on the kept subset before the output-level `keep_*` multiply.
+
+- `src/model/v4_ultimate.py:361-450` Fix B is still incomplete: `_encode_rxn`, `_encode_pocket`, `_encode_annot`, `_encode_condition`, and `_encode_ec` still use `hasattr(...)` followed by `.to(...)`, so a present-but-`None` optional field will still crash in the forward path. Why it matters: the commit message claims the None-guard issue is fixed in forward, but custom inference / partially populated `Data` objects can still fail the same way. Suggested fix: replace these remaining `hasattr` guards with `x = getattr(G, "...", None); if x is not None: ...` consistently.
+
+NEEDS_WORK
+tokens used
+66,569
+- `src/model/v4_ultimate.py:512-520,563-579` `y_pre` is still recorded after the 0/1 embed/token masks are applied, so dropped samples contribute bias-only branch outputs instead of eval-time branch magnitudes. Why it matters: the diagnostics this fix was meant to clean up are still survival-probability-dependent and can understate branch strength or compare branches incorrectly. Suggested fix: snapshot diagnostics from the unmasked branch path, or compute/log branch magnitudes only on the kept subset before the output-level `keep_*` multiply.
+
+- `src/model/v4_ultimate.py:361-450` Fix B is still incomplete: `_encode_rxn`, `_encode_pocket`, `_encode_annot`, `_encode_condition`, and `_encode_ec` still use `hasattr(...)` followed by `.to(...)`, so a present-but-`None` optional field will still crash in the forward path. Why it matters: the commit message claims the None-guard issue is fixed in forward, but custom inference / partially populated `Data` objects can still fail the same way. Suggested fix: replace these remaining `hasattr` guards with `x = getattr(G, "...", None); if x is not None: ...` consistently.
+
+NEEDS_WORK

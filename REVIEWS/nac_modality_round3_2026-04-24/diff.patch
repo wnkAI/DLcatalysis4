@@ -1,0 +1,185 @@
+diff --git a/src/model/v4_ultimate.py b/src/model/v4_ultimate.py
+index 71a08bc..9fceb77 100644
+--- a/src/model/v4_ultimate.py
++++ b/src/model/v4_ultimate.py
+@@ -228,7 +228,13 @@ class V4Ultimate(pl.LightningModule):
+             self._last_log_var = None  # stash for loss access
+ 
+         # ── Gates ──────────────────────────────────────────────────
+-        pair_in = self.hidden_dim * 2   # enz_pool + graph_emb
++        # pair_in is assembled from whichever branches are enabled, matching
++        # the order the forward pass concatenates them. Same pattern used
++        # for use_rxn_drfp / use_ec; extending it to use_substrate keeps
++        # the gate from carrying a dead W_graph column in A0.
++        pair_in = self.hidden_dim        # enz_pool always present
++        if self.use_substrate:
++            pair_in += self.hidden_dim   # graph_emb
+         if self.use_rxn_drfp:
+             pair_in += self.hidden_dim
+         if self.use_ec:
+@@ -241,7 +247,10 @@ class V4Ultimate(pl.LightningModule):
+         )
+ 
+         if self.use_pocket:
+-            struct_in = self.hidden_dim * 3 + 3   # enz + graph + pocket + (n_res, has_annot, has_cof)
++            # struct gate: enz + (graph?) + pocket + quality[3] + (ec?)
++            struct_in = self.hidden_dim * 2 + 3   # enz + pocket + quality
++            if self.use_substrate:
++                struct_in += self.hidden_dim      # graph_emb
+             if self.use_ec:
+                 struct_in += self.hidden_dim
+             self.gate_struct = nn.Sequential(
+@@ -321,11 +330,14 @@ class V4Ultimate(pl.LightningModule):
+         # Reaction-center dense flag, kept around for the NAC bias in int3d
+         # even when `use_rxn_center` (the atom-token injection) is disabled.
+         # We compute the dense layout once here as float and reuse the long
+-        # cast for the Embedding lookup below.
++        # cast for the Embedding lookup below. `getattr ... is not None`
++        # (not hasattr) because upstream code may set the attribute to
++        # None instead of omitting it.
+         rxn_center_dense = None
+-        if hasattr(G, "MOL_rxn_center") and atom_mask is not None:
++        _rxn_center = getattr(G, "MOL_rxn_center", None)
++        if _rxn_center is not None and atom_mask is not None:
+             from torch_geometric.utils import to_dense_batch
+-            center_flag_long = G.MOL_rxn_center.to(self.device).long()
++            center_flag_long = _rxn_center.to(self.device).long()
+             rxn_center_dense, _ = to_dense_batch(center_flag_long.float(),
+                                                  graph_batch)            # (B, A) float
+         # Add RXNMapper center flag to atom tokens (if enabled). Reuses the
+@@ -468,34 +480,44 @@ class V4Ultimate(pl.LightningModule):
+ 
+         # ── Modality dropout ──
+         # Per-sample Bernoulli dropout of rxn / pocket / annot branches
+-        # during training only. Uses *inverted scaling*: the survival mask
+-        # is divided by (1 - p) so E[keep * x] == x, matching standard
+-        # dropout semantics and keeping train/test distributions aligned.
+-        # The same mask is applied in three places so "dropped" truly means
+-        # the branch contributes zero for that sample AND the encoder for
+-        # that branch receives no gradient through the predictor:
+-        #   (a) pooled embedding used by gates (embed-level)
+-        #   (b) token tensors consumed by cross-attention (token-level)
+-        #   (c) final y_* contribution (output-level)
++        # during training only. Two masks are derived from the same sample
++        # for each modality to avoid compounding the `1/(1-p)` scaling:
++        #   mask01  ∈ {0, 1}   — used at input / token level for zeroing;
++        #                         this hides the modality from the encoder
++        #                         path and stops gradient flow on dropped
++        #                         samples but does NOT amplify kept samples.
++        #   keep    ∈ {0, 1/(1-p)} — used once at output level so that
++        #                         E[keep * y] = y_eval; this is the only
++        #                         place the inverted scaling is applied.
++        # Inference (self.training=False) returns all-ones for both masks,
++        # so val/test metrics are unaffected.
+         md = self.config["model"].get("modality_dropout", {}) or {}
+-        def _keep(p):
++        def _masks(p):
++            """Return (mask01, keep_inv).
++            mask01  — 0/1 zeroing mask (no scaling).
++            keep_inv — mask01 / (1 - p) for inverted dropout at output.
++            Both are (B, 1). At p<=0 or eval, both are all-ones."""
+             if (not self.training) or p <= 0.0:
+-                return torch.ones(B, 1, device=self.device)
+-            q = 1.0 - float(p)
+-            mask = (torch.rand(B, 1, device=self.device) >= float(p)).float()
+-            return mask / max(q, 1e-6)
+-        keep_rxn    = _keep(md.get("rxn",    0.0))
+-        keep_pocket = _keep(md.get("pocket", 0.0))
+-        keep_annot  = _keep(md.get("annot",  0.0))
+-        # Embed-level: gates can't see a dropped modality
+-        rxn_emb     = rxn_emb     * keep_rxn
+-        pocket_pool = pocket_pool * keep_pocket
+-        annot_emb   = annot_emb   * keep_annot
+-        # Token-level: zero pocket_tokens so the int3d cross-attn cannot
+-        # leak gradient to the pocket GVP for dropped samples. Shape
+-        # (B, K, D) is broadcast against (B, 1) → (B, 1, 1).
++                ones = torch.ones(B, 1, device=self.device)
++                return ones, ones
++            mask01 = (torch.rand(B, 1, device=self.device)
++                      >= float(p)).float()
++            keep_inv = mask01 / max(1.0 - float(p), 1e-6)
++            return mask01, keep_inv
++        mask01_rxn,    keep_rxn    = _masks(md.get("rxn",    0.0))
++        mask01_pocket, keep_pocket = _masks(md.get("pocket", 0.0))
++        mask01_annot,  keep_annot  = _masks(md.get("annot",  0.0))
++        # Embed-level (0/1 mask, NO scaling): gates and heads see a plain
++        # zero for dropped samples and the original embedding otherwise.
++        rxn_emb     = rxn_emb     * mask01_rxn
++        pocket_pool = pocket_pool * mask01_pocket
++        annot_emb   = annot_emb   * mask01_annot
++        # Token-level (0/1 mask): zero pocket_tokens so int3d cross-attn
++        # cannot leak gradient to the pocket GVP on dropped samples AND
++        # so softmax temperature isn't perturbed by a 1/(1-p) rescale of
++        # the Q/K/V activations. Shape (B, K, D) broadcasts against (B,1,1).
+         if pocket_tokens is not None:
+-            pocket_tokens = pocket_tokens * keep_pocket.unsqueeze(-1)
++            pocket_tokens = pocket_tokens * mask01_pocket.unsqueeze(-1)
+ 
+         # ── Branches ──
+         y_seq = self.head_seq(enz_fused)
+@@ -511,14 +533,16 @@ class V4Ultimate(pl.LightningModule):
+             from torch_geometric.utils import to_dense_batch
+             atom_xyz = None
+             xyz_valid_per_sample = None
+-            if hasattr(G, "MOL_graph_xyz") and hasattr(G, "MOL_graph_xyz_valid") \
+-                    and bool(G.MOL_graph_xyz_valid.any().item()):
++            _mol_xyz = getattr(G, "MOL_graph_xyz", None)
++            _mol_xyz_valid = getattr(G, "MOL_graph_xyz_valid", None)
++            if (_mol_xyz is not None and _mol_xyz_valid is not None
++                    and bool(_mol_xyz_valid.any().item())):
+                 num_nodes = G.MOL_graph_num_nodes.to(self.device).view(-1)
+                 atom_batch = torch.repeat_interleave(
+                     torch.arange(num_nodes.size(0), device=self.device), num_nodes
+                 )
+-                atom_xyz, _ = to_dense_batch(G.MOL_graph_xyz.to(self.device).float(), atom_batch)
+-                xyz_valid_per_sample = G.MOL_graph_xyz_valid.view(-1).to(self.device)
++                atom_xyz, _ = to_dense_batch(_mol_xyz.to(self.device).float(), atom_batch)
++                xyz_valid_per_sample = _mol_xyz_valid.view(-1).to(self.device)
+             _, _, p_pool_int, a_pool_int = self.int3d(
+                 pocket_tokens, atom_tokens, pocket_mask, atom_mask,
+                 xyz_p=pocket_xyz, xyz_a=atom_xyz,
+@@ -555,7 +579,11 @@ class V4Ultimate(pl.LightningModule):
+         y_annot  = y_annot  * keep_annot
+ 
+         # ── Gates ──
+-        pair_gate_in = [enz_fused, graph_emb]
++        # pair_gate_in order must match the branch ordering used in __init__
++        # to build `pair_in`: enz, (graph?), (rxn?), (ec?).
++        pair_gate_in = [enz_fused]
++        if self.use_substrate:
++            pair_gate_in.append(graph_emb)
+         if self.use_rxn_drfp:
+             pair_gate_in.append(rxn_emb)
+         if self.use_ec:
+@@ -565,15 +593,25 @@ class V4Ultimate(pl.LightningModule):
+         if self.use_pocket:
+             n_res = (pocket_mask.sum(dim=1, keepdim=True).float() / 32.0) \
+                 if pocket_mask is not None else torch.zeros(B, 1, device=self.device)
+-            # Real signals from dataloader (no longer stubbed zeros)
+-            has_annot_flag = (G.ANNOT_has_any.to(self.device).view(B, 1)
+-                              if hasattr(G, "ANNOT_has_any")
++            # Real signals from dataloader. Using getattr-is-not-None guards
++            # here because upstream PyG Data objects sometimes set optional
++            # fields to None instead of omitting them — a raw hasattr passes
++            # through and the subsequent .to() crashes.
++            _annot_any = getattr(G, "ANNOT_has_any", None)
++            _annot_cof = getattr(G, "ANNOT_has_cof", None)
++            has_annot_flag = (_annot_any.to(self.device).view(B, 1)
++                              if _annot_any is not None
+                               else torch.zeros(B, 1, device=self.device))
+-            has_cof = (G.ANNOT_has_cof.to(self.device).view(B, 1)
+-                       if hasattr(G, "ANNOT_has_cof")
++            has_cof = (_annot_cof.to(self.device).view(B, 1)
++                       if _annot_cof is not None
+                        else torch.zeros(B, 1, device=self.device))
+             quality = torch.cat([n_res, has_annot_flag, has_cof], dim=-1)
+-            struct_in = [enz_fused, graph_emb, pocket_pool, quality]
++            # struct_in order matches __init__ assembly of `struct_in` dim:
++            # enz + (graph?) + pocket + quality + (ec?).
++            struct_in = [enz_fused]
++            if self.use_substrate:
++                struct_in.append(graph_emb)
++            struct_in.extend([pocket_pool, quality])
+             if self.use_ec:
+                 struct_in.append(ec_emb)
+             g_struct = torch.sigmoid(self.gate_struct(torch.cat(struct_in, dim=-1)))

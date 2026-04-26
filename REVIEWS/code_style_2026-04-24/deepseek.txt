@@ -1,0 +1,201 @@
+Looking at this codebase, I can identify several themes of code hygiene issues. Here's my analysis grouped by theme:
+
+## Duplication
+
+1. **`_attn_pool_seq` method duplicated across 3 files**
+   - `v4_ultimate.py:147-151`, `v4_pocket.py:149-153`, `v4_minimal.py:119-124`
+   - Same attention pooling logic, identical implementation
+   - **Suggested replacement**: Move to `module.py` as a standalone function `attention_pool(feat, mask, pool_head)`
+
+2. **`_pairwise_ranking` method duplicated across 3 files**
+   - `v4_ultimate.py:263-284`, `v4_pocket.py:268-289`, `v4_minimal.py:157-178`
+   - Identical implementation for pairwise ranking loss computation
+   - **Suggested replacement**: Move to `module.py` as a utility function
+
+3. **`_encode_ec` method duplicated across 3 files**
+   - `v4_ultimate.py:336-348`, `v4_pocket.py:214-226`, `v4_minimal.py:148-160`
+   - Same EC embedding logic with identical Embedding layers and projection
+   - **Suggested replacement**: Create an `ECEmbedding` module in `module.py`
+
+4. **`_init_weights` method duplicated across 4 files**
+   - `v4_ultimate.py:131-136`, `v4_pocket.py:140-145`, `v4_minimal.py:110-115`, `v4_innovate.py:157-162`
+   - Same weight initialization logic
+   - **Suggested replacement**: Add as a mixin or base class method
+
+5. **`calculate_metrics` method duplicated across 3 files**
+   - `v4_ultimate.py:310-319`, `v4_pocket.py:315-324`, `v4_minimal.py:188-197`
+   - Same metric computation logic
+   - **Suggested replacement**: Move to `util/metrics.py` (already exists with `report_all`)
+
+6. **`_save_results` method duplicated across 3 files**
+   - `v4_ultimate.py:350-355`, `v4_pocket.py:355-360`, `v4_minimal.py:228-233`
+   - Same CSV logging logic
+   - **Suggested replacement**: Move to a shared utility
+
+7. **`configure_optimizers` method duplicated across 4 files**
+   - `v4_ultimate.py:357-372`, `v4_pocket.py:362-377`, `v4_minimal.py:240-255`, `v4_innovate.py:276-291`
+   - Same AdamW + cosine annealing LR scheduler logic
+   - **Suggested replacement**: Create a factory function `create_optimizer_and_scheduler(config, model)`
+
+## Dead Code
+
+1. **`v4_ultimate.py:1-30` - Module-level docstring**
+   - Contains detailed architecture description that's already in the class docstring
+   - **Suggested replacement**: Remove or consolidate with class docstring
+
+2. **`module.py:1-10` - Unused imports**
+   - `from torch.nn.modules.loss import _WeightedLoss` - only used by `SmoothCrossEntropyLoss` which may be dead code
+   - `from math import pi as PI` - only used by `SinRBF` which may be unused
+   - **Suggested replacement**: Remove if classes are unused
+
+3. **`module.py:15-70` - Multiple utility functions**
+   - `split_tensor_by_batch`, `concat_tensors_to_batch`, `split_tensor_to_segments`, `split_tensor_by_lengths`, `batch_intersection_mask` - likely unused in current codebase
+   - **Suggested replacement**: Remove or move to a separate legacy module
+
+4. **`module.py:72-90` - `MeanReadout` and `SumReadout` classes**
+   - Not used anywhere in the model files
+   - **Suggested replacement**: Remove
+
+5. **`module.py:92-130` - `MultiLayerPerceptron` class**
+   - Duplicates functionality of `MLP` class (lines 140-180)
+   - **Suggested replacement**: Remove in favor of `MLP`
+
+6. **`module.py:132-138` - `Swish` class**
+   - Not used anywhere (NONLINEARITIES dict uses `silu` which is PyTorch's built-in)
+   - **Suggested replacement**: Remove
+
+7. **`module.py:182-210` - `SmoothCrossEntropyLoss` class**
+   - Classification loss in a regression codebase
+   - **Suggested replacement**: Remove
+
+8. **`module.py:212-240` - `GaussianSmearing`, `SinRBF`, `ShiftedSoftplus` classes**
+   - Not used in any model file
+   - **Suggested replacement**: Remove
+
+9. **`module.py:242-290` - `compose_context`, `compose_batch_context`, `get_complete_graph`, `compose_context_stable` functions**
+   - Not used in any model file
+   - **Suggested replacement**: Remove
+
+10. **`module.py:292-320` - `__main__` test block**
+    - Should be removed from production code
+    - **Suggested replacement**: Remove
+
+## Over-engineered Abstractions
+
+1. **`v4_ultimate.py:1-30` - Module-level docstring**
+   - Contains detailed architecture description that's already in the class docstring
+   - **Suggested replacement**: Remove or consolidate with class docstring
+
+2. **`v4_ultimate.py:1-30` - Module-level docstring**
+   - Contains detailed architecture description that's already in the class docstring
+   - **Suggested replacement**: Remove or consolidate with class docstring
+
+## Verbose / Non-idiomatic Python
+
+1. **`v4_ultimate.py:147-151` - `_attn_pool_seq` method**
+   - Could use `torch.where` instead of `masked_fill` + `any`
+   - **Suggested replacement**: 
+   ```python
+   def _attn_pool_seq(self, feat, mask, pool_head):
+       scores = pool_head(feat)
+       scores = scores.masked_fill(~mask.bool(), torch.finfo(scores.dtype).min)
+       weights = torch.softmax(scores, dim=1)
+       weights = weights * mask.any(dim=1, keepdim=True).float()
+       return (feat * weights).sum(dim=1)
+   ```
+
+2. **`v4_ultimate.py:155-165` - `_encode_enzyme` method**
+   - Uses `getattr` with `None` check pattern repeatedly
+   - **Suggested replacement**: Create a helper `_safe_getattr(obj, attr, default=None)`
+
+3. **`v4_ultimate.py:263-284` - `_pairwise_ranking` method**
+   - Complex nested loops that could be vectorized
+   - **Suggested replacement**: Use PyTorch's `torch.cdist` or `torch.pdist` for pairwise comparisons
+
+4. **`v4_ultimate.py:310-319` - `calculate_metrics` method**
+   - Manual NaN handling could use `np.nan_to_num`
+   - **Suggested replacement**: 
+   ```python
+   def calculate_metrics(self, y_pred, y_true):
+       yp = y_pred.cpu().numpy().flatten()
+       yt = y_true.cpu().numpy().flatten()
+       pcc = np.corrcoef(yt, yp)[0, 1]
+       scc, _ = spearmanr(yt, yp)
+       return {
+           "R2": r2_score(yt, yp),
+           "PCC": np.nan_to_num(pcc),
+           "SCC": np.nan_to_num(scc),
+           "MSE": mean_squared_error(yt, yp),
+           "MAE": mean_absolute_error(yt, yp),
+           "RMSE": float(np.sqrt(mean_squared_error(yt, yp)))
+       }
+   ```
+
+5. **`v4_ultimate.py:357-372` - `configure_optimizers` method**
+   - Complex lambda function for LR scheduling
+   - **Suggested replacement**: Use `torch.optim.lr_scheduler.CosineAnnealingWarmRestarts` or a simpler approach
+
+## Stale Comments
+
+1. **`v4_ultimate.py:1-30` - Module-level docstring**
+   - References "commit 2a0f337" which is stale
+   - **Suggested replacement**: Remove commit references
+
+2. **`v4_ultimate.py:1-30` - Module-level docstring**
+   - References "v4-minimal / v4-pocket" which are separate files
+   - **Suggested replacement**: Keep only high-level architecture description
+
+## Inconsistent Naming
+
+1. **`v4_ultimate.py:147-151` vs `v4_minimal.py:119-124`**
+   - `_attn_pool_seq` vs `_attn_pool_seq` (same name, good)
+   - But `v4_innovate.py:165-170` uses `_attn_pool_seq` with different signature (no `pool_head` parameter)
+   - **Suggested replacement**: Standardize the interface
+
+2. **`v4_ultimate.py:155-165` vs `v4_pocket.py:155-163`**
+   - `_encode_enzyme` returns `(feat, pooled, seq_mask)` in both
+   - But `v4_minimal.py:126-134` returns `(enzyme_feat, enzyme_pooled, seq_mask)` with different variable names
+   - **Suggested replacement**: Standardize return variable names
+
+## Redundant Safety Logic
+
+1. **`v4_ultimate.py:147-151` - `_attn_pool_seq` method**
+   - `mask < 0.5` check is redundant since mask is already float 0/1
+   - **Suggested replacement**: Use `~mask.bool()` directly
+
+2. **`v4_ultimate.py:263-284` - `_pairwise_ranking` method**
+   - `max(n_pairs, 1)` is defensive but `n_pairs` is always >= 0
+   - **Suggested replacement**: Use `n_pairs or 1`
+
+3. **`v4_ultimate.py:310-319` - `calculate_metrics` method**
+   - NaN checks for pcc and scc are defensive but `np.corrcoef` and `spearmanr` handle NaN internally
+   - **Suggested replacement**: Use `np.nan_to_num` at the end
+
+## Top 5 Refactors Worth Doing
+
+1. **Extract shared utilities to `module.py`** (High impact, low risk)
+   - Move `_attn_pool_seq`, `_pairwise_ranking`, `_encode_ec`, `_init_weights`, `calculate_metrics`, `_save_results`, `configure_optimizers` to shared functions/modules
+   - Reduces ~400 lines of duplicated code across 4 files
+   - Makes future changes consistent across all model variants
+
+2. **Clean up `module.py` dead code** (Medium impact, low risk)
+   - Remove unused classes: `MeanReadout`, `SumReadout`, `MultiLayerPerceptron`, `Swish`, `SmoothCrossEntropyLoss`, `GaussianSmearing`, `SinRBF`, `ShiftedSoftplus`
+   - Remove unused functions: `split_tensor_by_batch`, `concat_tensors_to_batch`, `split_tensor_to_segments`, `split_tensor_by_lengths`, `batch_intersection_mask`, `compose_context`, `compose_batch_context`, `get_complete_graph`, `compose_context_stable`
+   - Remove `__main__` test block
+   - Reduces ~200 lines of dead code
+
+3. **Standardize encoder interfaces across model variants** (Medium impact, medium risk)
+   - Ensure `_encode_enzyme`, `_encode_substrate`, `_encode_pocket` return consistent tuples across all 4 model files
+   - Currently `v4_innovate.py` has different return signatures for some encoders
+   - Enables easier consolidation and testing
+
+4. **Simplify `configure_optimizers` with a factory function** (Low impact, low risk)
+   - Create `create_optimizer_and_scheduler(config, model)` in `module.py`
+   - Reduces ~60 lines of duplicated code
+   - Makes LR schedule changes apply to all models at once
+
+5. **Remove stale comments and consolidate docstrings** (Low impact, low risk)
+   - Remove commit references, version-specific notes
+   - Consolidate module-level and class-level docstrings
+   - Standardize docstring format across all files
+   - Improves readability and maintainability

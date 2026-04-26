@@ -1,0 +1,14 @@
+{
+  "seed": 42,
+  "n_total_rows": 24961,
+  "n_after_filter": 24961,
+  "n_templates_total": 11121,
+  "n_templates_train": 9453,
+  "n_templates_valid": 556,
+  "n_templates_test": 1112,
+  "rows_train": 21408,
+  "rows_valid": 1057,
+  "rows_test": 2496,
+  "fallback_template_keys": 0,
+  "rdkit_available": true
+}

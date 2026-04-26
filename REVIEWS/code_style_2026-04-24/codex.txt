@@ -1,0 +1,708 @@
+OpenAI Codex v0.116.0 (research preview)
+--------
+workdir: E:\AImodel\DLcatalysis4.0
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 019dbede-e218-7793-96ea-e45dd8c47a52
+--------
+user
+Project at E:/AImodel/DLcatalysis4.0. Read REVIEWS/code_style_2026-04-24/BRIEF.md for the rubric. Focus scope: src/model/ and src/util/ — report DEAD CODE and CROSS-FILE DUPLICATION. Output grouped by theme, with file+line citations and concrete suggested replacements. End with top-5 refactors.
+mcp startup: no servers
+codex
+I’m reviewing `REVIEWS/code_style_2026-04-24/BRIEF.md` first, then I’ll inspect `src/model/` and `src/util/` specifically for dead code and cross-file duplication with line-cited findings.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg --files src/model src/util' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'Get-Content REVIEWS/code_style_2026-04-24/BRIEF.md' in E:\AImodel\DLcatalysis4.0 succeeded in 584ms:
+# /five brief 鈥?project-level code style + redundancy audit
+
+Repo: `E:/AImodel/DLcatalysis4.0` (~10k lines Python, 41 files).
+
+File-by-file line counts in `file_list.txt`.
+
+This is not a bug-review pass (we just finished 5 rounds of that). The
+goal here is **code hygiene**: find duplication, dead code, over-engineered
+abstractions, verbose non-idiomatic Python, and comments that have rotted.
+
+## What to look for
+
+1. **Cross-file duplication.** Same function reimplemented in multiple
+   places (e.g. attention pooling, masked mean, to_dense_batch wrappers).
+   Flag pairs/triples that could be consolidated into a shared util.
+
+2. **Dead code.** Imports never used, functions never called, parameters
+   wired but never exercised, feature flags left over from v3.0 that no
+   longer matter.
+
+ succeeded in 1.25s:
+src/util\__init__.py
+src/util\tools.py
+src/util\seq_process.py
+src/util\metrics.py
+src/model\__init__.py
+src/model\v4_ultimate.py
+src/model\v4_pocket.py
+src/model\v4_minimal.py
+src/model\v4_innovate.py
+src/model\substrate_gnn.py
+src/model\module.py
+src/model\int3d_cross_attn.py
+src/model\gvp_pocket.py
+src/model\ec_cross_attn.py
+src/util\data_load.py
+src/util\constants.py
+src/util\data_module.py
+src/util\featurize\__init__.py
+src/util\featurize\seq_prot5.py
+codex
+The rubric is clear: this is a hygiene pass, not a bug hunt. I’m mapping the public surface and helper functions in `src/model/` and `src/util/` now so I can separate true duplication from intentionally divergent variants.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "(_attn_pool|masked mean|masked_mean|to_dense_batch|dense batch|pool|cross_attn|encode_substrate|encode_(enzyme|sequence|protein)|unused|TODO|FIXME)" src/model src/util' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^(def|class) " src/model src/util' in E:\AImodel\DLcatalysis4.0 succeeded in 483ms:
+src/model\gvp_pocket.py:28:def _pairwise_norm(v: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+src/model\gvp_pocket.py:33:class GVP(nn.Module):
+src/model\gvp_pocket.py:73:class GVPConv(MessagePassing):
+src/model\gvp_pocket.py:124:class PocketGVP(nn.Module):
+src/model\module.py:10:def split_tensor_by_batch(x, batch, num_graphs=None):
+src/model\module.py:27:def concat_tensors_to_batch(x_split):
+src/model\module.py:36:def split_tensor_to_segments(x, segsize):
+src/model\module.py:45:def split_tensor_by_lengths(x, lengths):
+src/model\module.py:53:def batch_intersection_mask(batch, batch_filter):
+src/model\module.py:59:class MeanReadout(nn.Module):
+src/model\module.py:75:class SumReadout(nn.Module):
+src/model\module.py:91:class MultiLayerPerceptron(nn.Module):
+src/model\module.py:132:class Swish(nn.Module):
+src/model\module.py:151:class MLP(nn.Module):
+src/model\module.py:198:class SmoothCrossEntropyLoss(_WeightedLoss):
+src/model\module.py:233:class GaussianSmearing(nn.Module):
+src/model\module.py:245:class SinRBF(nn.Module):
+src/model\module.py:259:class ShiftedSoftplus(nn.Module):
+src/model\module.py:268:def compose_context(h_protein, h_ligand, pos_protein, pos_ligand, batch_protein, batch_ligand):
+src/model\module.py:284:def compose_batch_context(h_protein, h_ligand, num_protein_nodes, num_ligand_nodes):
+ succeeded in 487ms:
+src/model\gvp_pocket.py:16:  pocket_pool   (B, D)           — attention-pooled pocket embedding (for y_struct)
+src/model\gvp_pocket.py:25:from torch_geometric.utils import to_dense_batch
+src/model\gvp_pocket.py:125:    """Stack of GVP layers + attention pooling.
+src/model\gvp_pocket.py:157:        # Attention pool over residues (scalar-only)
+src/model\gvp_pocket.py:158:        self.attn_pool = nn.Sequential(
+src/model\gvp_pocket.py:175:          pocket_pool:   (B, hidden_dim)        — attention-pooled
+src/model\gvp_pocket.py:185:        pocket_tokens, pocket_mask = to_dense_batch(s, batch)  # (B, K, D), (B, K)
+src/model\gvp_pocket.py:187:        # Attention pool
+src/model\gvp_pocket.py:188:        scores = self.attn_pool(pocket_tokens)                 # (B, K, 1)
+src/model\gvp_pocket.py:193:        pocket_pool = (pocket_tokens * weights).sum(dim=1)     # (B, D)
+src/model\gvp_pocket.py:195:        return pocket_tokens, pocket_pool, pocket_mask
+src/model\ec_cross_attn.py:58:    Returns concatenated pooled output across 2 or 4 directions.
+src/model\ec_cross_attn.py:90:        pooled = [enz_sub_out.mean(1), sub_enz_out.mean(1)]
+src/model\ec_cross_attn.py:97:            pooled += [enz_prod_out.mean(1), prod_enz_out.mean(1)]
+src/model\ec_cross_attn.py:99:        cat = torch.cat(pooled, dim=-1)  # (B, 2D or 4D)
+src/model\int3d_cross_attn.py:178:    """Stack of bidirectional 3D cross-attention layers + pooled output."""
+src/model\int3d_cross_attn.py:186:        self.pool_p = nn.Sequential(
+src/model\int3d_cross_attn.py:188:        self.pool_a = nn.Sequential(
+src/model\int3d_cross_attn.py:191:    def _attn_pool(self, tokens, mask, pool_head):
+src/model\int3d_cross_attn.py:192:        scores = pool_head(tokens)
+codex
+I’ve already got one likely cluster: the three `v4_*` modules each hand-roll near-identical sequence/substrate/pocket encoding and attention pooling. I’m reading those implementations side by side now to confirm which parts are truly duplicated and which are model-specific.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_ultimate.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_innovate.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_minimal.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_pocket.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }' in E:\AImodel\DLcatalysis4.0 exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_ultimate.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_minimal.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_innovate.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }'` rejected: blocked by policy
+ exited -1 in 0ms:
+`"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command '$i=1; Get-Content src/model/v4_pocket.py | ForEach-Object { '"'{0,4}: {1}' -f "'$i, $_; $i++ }'` rejected: blocked by policy
+codex
+The shell is blocking my first line-numbering approach, so I’m switching to `rg -n "^"` reads. That still gives precise line citations without relying on a rejected PowerShell format loop.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_pocket.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_innovate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_minimal.py' in E:\AImodel\DLcatalysis4.0 succeeded in 444ms:
+1:"""
+2:DLcatalysis 4.0 — v4-pocket (full 4-branch residual with structure).
+3:
+4:    pred = y_seq + g_pair * (y_sub + y_int3d) + g_struct * y_struct
+5:
+6:    y_seq   : ProtT5 (frozen) -> attn-pool -> MLP head      (enzyme baseline)
+7:    y_sub   : GINE(4) on substrate SMILES -> graph_pool      (substrate effect)
+8:    y_int3d : residue tokens × atom tokens with 3D distance  (interaction)
+9:             cross-attention bias → pooled → MLP
+10:    y_struct: GVP-GNN pocket encoder -> attn-pool -> MLP      (pocket structure)
+11:    g_pair  : sigmoid(MLP([enz_pool, graph_emb]))
+12:    g_struct: sigmoid(MLP([enz_pool, graph_emb, pocket_pool, struct_quality]))
+13:              initial bias = -2.0 so structure starts as conservative residual
+14:
+15:Compared to v4_minimal:
+16:  - Adds GVP pocket branch
+17:  - Replaces attention-only interaction with 3D-distance-aware cross-attention
+18:  - Two independent gates (g_pair stays, g_struct is new)
+19:"""
+20:import math
+ succeeded in 442ms:
+1:"""
+2:DLcatalysis 4.0 — v4-ultimate (集大成版).
+3:
+4:    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+5:
+6:    Branches:
+7:      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+8:      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+9:      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+10:      y_int3d  : pocket residue × substrate atom cross-attn + 3D RBF  (interaction)
+11:      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+12:      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+13:
+14:    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb?, ec?)
+15:              NOTE: annot_emb is NOT fed into g_pair — the annotation branch
+16:              has its own dedicated g_annot (see below). Mixing annot into
+17:              g_pair would couple the pair-specific residual strength to
+18:              enzyme annotation availability.
+19:    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality[3], ec?)
+20:              quality = [n_res/K, has_active_site∨has_binding_site, has_cofactor]
+ succeeded in 458ms:
+1:"""
+2:DLcatalysis 4.0 — v4-minimal (2-branch residual with dynamic gate).
+3:
+4:    pred = y_seq + g * y_sub
+5:
+6:    y_seq : ProtT5 (frozen) -> MLP -> attn-pool -> MLP head
+7:    y_sub : GINE(4) on substrate SMILES -> graph_pool -> MLP head
+8:    g     : sigmoid(MLP([enz_pool, graph_emb]))
+9:
+10:Adapted from DLcatalysis 3.0 src/model/enzsub.py with:
+11:  - Cross-attention (y_int) REMOVED (deferred to v4-pocket / v4-fusion)
+12:  - Morgan / MolT5 / Grover / UniMol legacy branches REMOVED
+13:  - MSA residue-level fusion REMOVED
+14:  - Retains: ranking losses, PCC loss, EC embedding, attention pool
+15:"""
+16:import math
+17:import os
+18:import sys
+19:from datetime import datetime
+20:from pathlib import Path
+ succeeded in 456ms:
+1:"""
+2:DLcatalysis 4.0 — v4-innovate (novel-contribution focused)
+3:
+4:THREE novel components w.r.t. 3.0 / CatPred / TurNuP / EnzymeCAGE:
+5:
+6:  (1) Multi-task heads with physical-consistency regularization.
+7:      Predict (log10 kcat, log10 Km, log10 kcat/Km) jointly.
+8:      Enforce: ŷ_kcat - ŷ_km ≈ ŷ_kcatkm  (stoichiometry of rate constants).
+9:      This decouples turnover vs binding contributions — no prior kinetics
+10:      predictor trains all three with a consistency constraint.
+11:
+12:  (2) Pair-specific local complex pocket.
+13:      Pocket is keyed by (uniprot_id, smi_id), not uniprot_id alone.
+14:      Different substrates for the same enzyme get different docked
+15:      complexes → y_struct and y_int3d genuinely differ across substrates
+16:      (EnzymeCAGE's AlphaFill-derived pocket is enzyme-level only).
+17:      Docking handled upstream by scripts/20_run_vina_pair_docking.py.
+18:
+19:  (3) Within-enzyme discrimination as primary metric.
+20:      We report per-enzyme Spearman, top-1 hit, pair-accuracy in addition
+codex
+The main duplication pattern is confirmed, but I need the middle of `v4_ultimate.py` untruncated because that file appears to duplicate both the pocket encoder path and the training/metrics stack. I’m pulling targeted ranges around those helpers now.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_ultimate.py -A 140 -B 0 "''^364:"' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_ultimate.py -A 180 -B 0 "''^430:"' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/v4_ultimate.py -A 120 -B 20 "''^520:"' in E:\AImodel\DLcatalysis4.0 exited 1 in 396ms:
+src/model/v4_ultimate.py:1:"""
+src/model/v4_ultimate.py:2:DLcatalysis 4.0 — v4-ultimate (集大成版).
+src/model/v4_ultimate.py:3:
+src/model/v4_ultimate.py:4:    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+src/model/v4_ultimate.py:5:
+src/model/v4_ultimate.py:6:    Branches:
+src/model/v4_ultimate.py:7:      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+src/model/v4_ultimate.py:8:      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+src/model/v4_ultimate.py:9:      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+src/model/v4_ultimate.py:10:      y_int3d  : pocket residue × substrate atom cross-attn + 3D RBF  (interaction)
+src/model/v4_ultimate.py:11:      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+src/model/v4_ultimate.py:12:      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+src/model/v4_ultimate.py:13:
+src/model/v4_ultimate.py:14:    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb?, ec?)
+src/model/v4_ultimate.py:15:              NOTE: annot_emb is NOT fed into g_pair — the annotation branch
+src/model/v4_ultimate.py:16:              has its own dedicated g_annot (see below). Mixing annot into
+src/model/v4_ultimate.py:17:              g_pair would couple the pair-specific residual strength to
+src/model/v4_ultimate.py:18:              enzyme annotation availability.
+src/model/v4_ultimate.py:19:    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality[3], ec?)
+src/model/v4_ultimate.py:20:              quality = [n_res/K, has_active_site∨has_binding_site, has_cofactor]
+ exited 1 in 390ms:
+src/model/v4_ultimate.py:1:"""
+src/model/v4_ultimate.py:2:DLcatalysis 4.0 — v4-ultimate (集大成版).
+src/model/v4_ultimate.py:3:
+src/model/v4_ultimate.py:4:    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+src/model/v4_ultimate.py:5:
+src/model/v4_ultimate.py:6:    Branches:
+src/model/v4_ultimate.py:7:      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+src/model/v4_ultimate.py:8:      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+src/model/v4_ultimate.py:9:      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+src/model/v4_ultimate.py:10:      y_int3d  : pocket residue × substrate atom cross-attn + 3D RBF  (interaction)
+src/model/v4_ultimate.py:11:      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+src/model/v4_ultimate.py:12:      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+src/model/v4_ultimate.py:13:
+src/model/v4_ultimate.py:14:    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb?, ec?)
+src/model/v4_ultimate.py:15:              NOTE: annot_emb is NOT fed into g_pair — the annotation branch
+src/model/v4_ultimate.py:16:              has its own dedicated g_annot (see below). Mixing annot into
+src/model/v4_ultimate.py:17:              g_pair would couple the pair-specific residual strength to
+src/model/v4_ultimate.py:18:              enzyme annotation availability.
+src/model/v4_ultimate.py:19:    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality[3], ec?)
+src/model/v4_ultimate.py:20:              quality = [n_res/K, has_active_site∨has_binding_site, has_cofactor]
+ exited 1 in 386ms:
+src/model/v4_ultimate.py:1:"""
+src/model/v4_ultimate.py:2:DLcatalysis 4.0 — v4-ultimate (集大成版).
+src/model/v4_ultimate.py:3:
+src/model/v4_ultimate.py:4:    pred = y_seq + g_pair * (y_sub + y_rxn + y_int3d) + g_struct * y_struct + g_annot * y_annot
+src/model/v4_ultimate.py:5:
+src/model/v4_ultimate.py:6:    Branches:
+src/model/v4_ultimate.py:7:      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+src/model/v4_ultimate.py:8:      y_sub    : GINE on substrate SMILES + RXNMapper center flag     (substrate effect)
+src/model/v4_ultimate.py:9:      y_rxn    : DRFP reaction fingerprint (2048d) -> MLP             (reaction delta, TurNuP-style)
+src/model/v4_ultimate.py:10:      y_int3d  : pocket residue × substrate atom cross-attn + 3D RBF  (interaction)
+src/model/v4_ultimate.py:11:      y_struct : GVP-GNN pocket encoder -> attn pool -> MLP           (catalytic pocket)
+src/model/v4_ultimate.py:12:      y_annot  : InterPro family + Pfam family + GO terms embedding   (functional prior)
+src/model/v4_ultimate.py:13:
+src/model/v4_ultimate.py:14:    g_pair  : sigmoid over (enz_pool, graph_emb, rxn_emb?, ec?)
+src/model/v4_ultimate.py:15:              NOTE: annot_emb is NOT fed into g_pair — the annotation branch
+src/model/v4_ultimate.py:16:              has its own dedicated g_annot (see below). Mixing annot into
+src/model/v4_ultimate.py:17:              g_pair would couple the pair-specific residual strength to
+src/model/v4_ultimate.py:18:              enzyme annotation availability.
+src/model/v4_ultimate.py:19:    g_struct: sigmoid over (enz_pool, graph_emb, pocket_pool, quality[3], ec?)
+src/model/v4_ultimate.py:20:              quality = [n_res/K, has_active_site∨has_binding_site, has_cofactor]
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "_last_test_metrics|enzyme_feat|seq_mask|atom_tokens|atom_mask|pocket_tokens|pocket_xyz|interaction_weight|use_prods_info|lambda_cons|lambda_reg" src/model/v4_innovate.py src/model/v4_pocket.py src/model/v4_minimal.py src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"def _encode_rxn|def _encode_pocket|def _encode_condition|def _encode_ec|def _encode_annotation|def _modality_masks|def forward\\(\" src/model/v4_ultimate.py -A 80 -B 5" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"split_tensor_by_batch|concat_tensors_to_batch|split_tensor_to_segments|split_tensor_by_lengths|batch_intersection_mask|MeanReadout|SumReadout|SmoothCrossEntropyLoss|GaussianSmearing|SinRBF|ShiftedSoftplus|compose_context_stable|compose_batch_context|get_complete_graph|compose_context\\(\" src" in E:\AImodel\DLcatalysis4.0 succeeded in 554ms:
+src\model\module.py:10:def split_tensor_by_batch(x, batch, num_graphs=None):
+src\model\module.py:27:def concat_tensors_to_batch(x_split):
+src\model\module.py:36:def split_tensor_to_segments(x, segsize):
+src\model\module.py:45:def split_tensor_by_lengths(x, lengths):
+src\model\module.py:53:def batch_intersection_mask(batch, batch_filter):
+src\model\module.py:59:class MeanReadout(nn.Module):
+src\model\module.py:75:class SumReadout(nn.Module):
+src\model\module.py:198:class SmoothCrossEntropyLoss(_WeightedLoss):
+src\model\module.py:216:        targets = SmoothCrossEntropyLoss._smooth_one_hot(targets, inputs.size(-1),
+src\model\module.py:233:class GaussianSmearing(nn.Module):
+src\model\module.py:245:class SinRBF(nn.Module):
+src\model\module.py:259:class ShiftedSoftplus(nn.Module):
+src\model\module.py:268:def compose_context(h_protein, h_ligand, pos_protein, pos_ligand, batch_protein, batch_ligand):
+src\model\module.py:284:def compose_batch_context(h_protein, h_ligand, num_protein_nodes, num_ligand_nodes):
+src\model\module.py:293:def get_complete_graph(batch):
+src\model\module.py:326:def compose_context_stable(h_protein, h_ligand, pos_protein, pos_ligand, batch_protein, batch_ligand):
+src\model\module.py:362:    h_ctx, pos_ctx, batch_ctx, mask_protein = compose_context_stable(h_protein, h_ligand, pos_protein, pos_ligand, batch_protein, batch_ligand)
+ succeeded in 580ms:
+src/model/v4_ultimate.py:72:        self._last_test_metrics = None
+src/model/v4_ultimate.py:311:        seq_mask = (~_pad).unsqueeze(-1).float().to(self.device)
+src/model/v4_ultimate.py:314:        pooled = self._attn_pool_seq(feat, seq_mask, self.seq_attn_pool)
+src/model/v4_ultimate.py:315:        return feat, pooled, seq_mask
+src/model/v4_ultimate.py:328:        atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
+src/model/v4_ultimate.py:342:        if _rxn_center is not None and atom_mask is not None:
+src/model/v4_ultimate.py:354:            m = atom_mask.unsqueeze(-1).float()                          # (B, A, 1)
+src/model/v4_ultimate.py:356:            atom_tokens = atom_tokens + center_emb * m
+src/model/v4_ultimate.py:362:        return atom_tokens, graph_emb, atom_mask, rxn_center_dense
+src/model/v4_ultimate.py:406:        pocket_xyz, _ = to_dense_batch(ca_xyz, batch)
+src/model/v4_ultimate.py:419:        return p_tokens, p_pool, p_mask, pocket_xyz, cat_dense
+src/model/v4_ultimate.py:495:        atom_tokens, graph_emb, atom_mask, rxn_center_dense = \
+src/model/v4_ultimate.py:498:        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz, pocket_cat = \
+src/model/v4_ultimate.py:541:        # Token-level (0/1 mask): zero pocket_tokens so int3d cross-attn
+src/model/v4_ultimate.py:545:        if pocket_tokens is not None:
+src/model/v4_ultimate.py:546:            pocket_tokens = pocket_tokens * mask01_pocket.unsqueeze(-1)
+src/model/v4_ultimate.py:558:        if self.use_int3d and pocket_tokens is not None and atom_tokens is not None and pocket_mask is not None:
+src/model/v4_ultimate.py:573:                pocket_tokens, atom_tokens, pocket_mask, atom_mask,
+src/model/v4_ultimate.py:574:                xyz_p=pocket_xyz, xyz_a=atom_xyz,
+src/model/v4_ultimate.py:582:        y_struct = self.head_struct(pocket_pool) if self.use_pocket and pocket_tokens is not None else torch.zeros(B, 1, device=self.device)
+ succeeded in 583ms:
+359-            masked_sum = (center_emb * m).sum(dim=1)                     # (B, D)
+360-            n_atoms = m.sum(dim=1).clamp(min=1.0)                        # (B, 1)
+361-            graph_emb = graph_emb + masked_sum / n_atoms
+362-        return atom_tokens, graph_emb, atom_mask, rxn_center_dense
+363-
+364:    def _encode_rxn(self, G, B):
+365-        _drfp = getattr(G, "RXN_drfp", None)
+366-        if not self.use_rxn_drfp or _drfp is None:
+367-            return torch.zeros(B, self.hidden_dim, device=self.device)
+368-        drfp = _drfp.to(self.device).float().view(B, -1)
+369-        return self.rxn_proj(drfp)
+370-
+371-    # Catalytic-residue prior used as a soft NAC bias in int3d.
+372-    # Indices correspond to STANDARD_AA order in scripts/14_extract_pockets.py:
+373-    # 1 ARG, 3 ASP, 4 CYS, 6 GLU, 8 HIS, 11 LYS, 15 SER, 18 TYR. These eight
+374-    # residues account for the vast majority of catalytic activity in MCSA
+375-    # (acid/base, nucleophile, metal-coordinating side chains).
+376-    _CATALYTIC_AA_IDX = (1, 3, 4, 6, 8, 11, 15, 18)
+377-
+378:    def _encode_pocket(self, G, B):
+codex
+Some likely dead utilities are already visible in `model/module.py`: several tensor split/readout helpers only appear at their own definitions. I’m verifying whether they’re truly unused anywhere else before I call them dead.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/model/module.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"split_tensor_by_batch|concat_tensors_to_batch|split_tensor_to_segments|split_tensor_by_lengths|batch_intersection_mask|MeanReadout|SumReadout|SmoothCrossEntropyLoss|GaussianSmearing|SinRBF|ShiftedSoftplus|compose_context_stable|compose_batch_context|get_complete_graph|compose_context\\(\" src/model src/util -g '"'!src/model/module.py'"'" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "calculate_metrics|_prepare_target|_pairwise_ranking|_flush_epoch|_save_results|configure_optimizers|training_step|validation_step|test_step" src/model/v4_minimal.py src/model/v4_pocket.py src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0 succeeded in 430ms:
+1:import math
+2:import torch
+3:import torch.nn as nn
+4:import torch.nn.functional as F
+5:from torch.nn.modules.loss import _WeightedLoss
+6:from torch_scatter import scatter_mean, scatter_add
+7:from math import pi as PI
+8:
+9:
+10:def split_tensor_by_batch(x, batch, num_graphs=None):
+11:    """
+12:    Args:
+13:        x:      (N, ...)
+14:        batch:  (B, )
+15:    Returns:
+16:        [(N_1, ), (N_2, ) ..., (N_B, ))]
+17:    """
+18:    if num_graphs is None:
+19:        num_graphs = batch.max().item() + 1
+20:    x_split = []
+ exited 1 in 454ms:
+
+ succeeded in 448ms:
+src/model/v4_ultimate.py:748:    def _prepare_target(self, y_true, stage):
+src/model/v4_ultimate.py:756:    def _pairwise_ranking(self, pred, target, ids, margin, min_diff=0.1, max_pairs=16):
+src/model/v4_ultimate.py:790:        y_target = self._prepare_target(y_true, stage).squeeze(-1).float()
+src/model/v4_ultimate.py:834:                rl, _, _ = self._pairwise_ranking(
+src/model/v4_ultimate.py:844:                rl, _, _ = self._pairwise_ranking(
+src/model/v4_ultimate.py:856:    def calculate_metrics(self, y_pred, y_true):
+src/model/v4_ultimate.py:869:    def training_step(self, batch, batch_idx):
+src/model/v4_ultimate.py:876:    def validation_step(self, batch, batch_idx):
+src/model/v4_ultimate.py:883:    def test_step(self, batch, batch_idx):
+src/model/v4_ultimate.py:889:    def _flush_epoch(self, split):
+src/model/v4_ultimate.py:894:        m = self.calculate_metrics(torch.cat(preds), torch.cat(targets))
+src/model/v4_ultimate.py:895:        self._save_results(split, m, len(torch.cat(targets)))
+src/model/v4_ultimate.py:899:    def on_train_epoch_end(self):      self._flush_epoch("train")
+src/model/v4_ultimate.py:900:    def on_validation_epoch_end(self): self._flush_epoch("val")
+src/model/v4_ultimate.py:910:        m = self.calculate_metrics(all_p, all_t)
+src/model/v4_ultimate.py:912:        self._save_results("test", m, len(all_t))
+src/model/v4_ultimate.py:918:    def _save_results(self, split, metrics, n):
+src/model/v4_ultimate.py:926:    def configure_optimizers(self):
+src/model/v4_pocket.py:351:    def _prepare_target(self, y_true, stage):
+src/model/v4_pocket.py:359:    def _pairwise_ranking(self, pred, target, ids, margin, min_diff=0.1, max_pairs=16):
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/util/metrics.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/util/tools.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/util/data_load.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "''^" src/util/data_module.py' in E:\AImodel\DLcatalysis4.0 succeeded in 436ms:
+1:"""
+2:Metrics for DLcatalysis 4.0 v4-innovate.
+3:
+4:Main addition over 3.0: **within-enzyme discrimination** metrics.
+5:
+6:Given predictions for many (enzyme, substrate) pairs, we group by enzyme
+7:and report per-group ranking quality — this directly measures whether the
+8:model can tell apart substrates for the SAME enzyme, which is the
+9:real-world use case (panel screening, mutation-driven preference shift).
+10:
+11:Global PCC/R²/MAE remain available but should be treated as secondary.
+12:"""
+13:from collections import defaultdict
+14:from typing import Dict, List, Sequence
+15:
+16:import numpy as np
+17:from scipy.stats import spearmanr, kendalltau
+18:
+19:
+20:def global_metrics(y_pred: np.ndarray, y_true: np.ndarray) -> dict:
+ succeeded in 440ms:
+1:import yaml
+2:from typing import Dict, Tuple
+3:from types import SimpleNamespace
+4:
+5:import os
+6:import torch
+7:import numpy as np
+8:import pandas as pd
+9:import random
+10:import pytorch_lightning as pl
+11:
+12:def set_seed(seed: int) -> None:
+13:    os.environ['PYTHONHASHSEED'] = str(seed)
+14:    torch.manual_seed(seed)
+15:    torch.cuda.manual_seed(seed)
+16:    torch.cuda.manual_seed_all(seed) 
+17:    pl.seed_everything(seed, workers=True, verbose=False)
+18:    np.random.seed(seed)
+19:    random.seed(seed)
+20:    torch.backends.cudnn.deterministic = True
+ succeeded in 435ms:
+1:"""
+2:DLcatalysis 4.0 data module — minimal version.
+3:
+4:Strips MSA/Morgan/MolT5/Grover/UniMol from 3.0. Keeps:
+5:  - ProtT5 precomputed LMDB
+6:  - Substrate molecular graph (PyG Data) cache
+7:  - Optional EC embedding
+8:  - GroupedSampler for same-enzyme / same-substrate ranking
+9:
+10:Data contract (CSV):
+11:  DATA_ID, SEQ_ID, SMI_ID, EC_NUMBER, Y_VALUE
+12:"""
+13:import hashlib
+14:import json
+15:import sys
+16:import pickle
+17:from pathlib import Path
+18:from typing import List, Dict, Optional
+19:from collections import defaultdict
+20:
+ succeeded in 454ms:
+1:import sys
+2:from pathlib import Path
+3:from typing import Any, List, Tuple, Dict
+4:PROJECT_ROOT = Path(__file__).resolve().parent.parent
+5:sys.path.append(str(PROJECT_ROOT))
+6:from util.constants import AA_NAME_SYM, BACKBONE_NAMES
+7:from util.tools import set_seed
+8:
+9:import pytorch_lightning as pl
+10:from torch_geometric.transforms import Compose
+11:from torch_geometric.loader import DataLoader
+12:from torch_geometric.data import Data
+13:import torch_geometric
+14:import torch
+15:#from torch_scatter import scatter
+16:
+17:import numpy as np
+18:import pandas as pd
+19:from typing import Dict
+20:from rdkit import Chem
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "prot5_encoder|seq_mlp|seq_attn_pool|_attn_pool_seq|_encode_enzyme|_encode_substrate|_encode_pocket|_encode_ec" src/model/v4_minimal.py src/model/v4_pocket.py src/model/v4_innovate.py src/model/v4_ultimate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"SequenceData|padding_seq_embedding|StructureComplexData|padding_struct_lig_embedding|PDBProtein|get_ligand_atom_features|parse_sdf_file_mol\" src -g '"'!src/util/data_load.py'"'" in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command "rg -n \"torch.cuda.manual_seed|seed_everything|PYTHONHASHSEED|cudnn.deterministic|cudnn.benchmark|set_seed\\(\" src" in E:\AImodel\DLcatalysis4.0 succeeded in 407ms:
+src\util\seq_process.py:11:from util.data_load import SequenceData, padding_seq_embedding
+src\util\data_module.py:36:from util.data_load import SequenceData, padding_seq_embedding
+src\util\data_module.py:253:            dat = padding_seq_embedding(dat, max_len)
+src\util\data_module.py:254:            seq_data = SequenceData.from_dict(dat)
+ succeeded in 420ms:
+src/model/v4_pocket.py:71:        self.prot5_encoder = prot5_embedding(device=init_device, config=enc_cfg)
+src/model/v4_pocket.py:72:        for p in self.prot5_encoder.parameters():
+src/model/v4_pocket.py:77:        self.seq_mlp = nn.Sequential(
+src/model/v4_pocket.py:78:            nn.Linear(self.prot5_encoder.embedding_dim, seq_cfg["seq_hidden_dim"]),
+src/model/v4_pocket.py:84:        self.seq_attn_pool = nn.Sequential(
+src/model/v4_pocket.py:185:        prot5_ids = set(id(m) for m in self.prot5_encoder.modules())
+src/model/v4_pocket.py:195:    def _attn_pool_seq(self, feat, mask, pool_head):
+src/model/v4_pocket.py:202:    def _encode_enzyme(self, G, B):
+src/model/v4_pocket.py:209:        feat = self.seq_mlp(x)
+src/model/v4_pocket.py:210:        pooled = self._attn_pool_seq(feat, seq_mask, self.seq_attn_pool)
+src/model/v4_pocket.py:213:    def _encode_substrate(self, G, B):
+src/model/v4_pocket.py:229:    def _encode_pocket(self, G, B):
+src/model/v4_pocket.py:254:    def _encode_ec(self, G, B):
+src/model/v4_pocket.py:274:        enzyme_feat, enz_pool, seq_mask = self._encode_enzyme(G, B)
+src/model/v4_pocket.py:275:        atom_tokens, graph_emb, atom_mask = self._encode_substrate(G, B)
+src/model/v4_pocket.py:276:        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz = self._encode_pocket(G, B)
+src/model/v4_pocket.py:277:        ec_feat = self._encode_ec(G, B)
+src/model/v4_ultimate.py:7:      y_seq    : ProtT5 (frozen) -> seq_mlp -> attn pool -> MLP       (enzyme baseline)
+src/model/v4_ultimate.py:96:        self.prot5_encoder = prot5_embedding(device=init_device, config=enc_cfg)
+src/model/v4_ultimate.py:97:        for p in self.prot5_encoder.parameters():
+ succeeded in 419ms:
+src\util\data_module.py:484:        set_seed(config["train"]["seed"])
+src\util\tools.py:12:def set_seed(seed: int) -> None:
+src\util\tools.py:13:    os.environ['PYTHONHASHSEED'] = str(seed)
+src\util\tools.py:15:    torch.cuda.manual_seed(seed)
+src\util\tools.py:16:    torch.cuda.manual_seed_all(seed) 
+src\util\tools.py:17:    pl.seed_everything(seed, workers=True, verbose=False)
+src\util\tools.py:20:    torch.backends.cudnn.deterministic = True
+src\util\tools.py:21:    torch.backends.cudnn.benchmark = False
+src\util\tools.py:52:    set_seed(seed=seed)
+codex
+I have enough evidence for the big architectural duplicates. I’m doing one last pass for low-risk dead code: unused imports, helper classes never referenced, and values computed/returned but never consumed.
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "return None, z, None|return feat, pooled, seq_mask|return atom_tokens, graph_emb, atom_mask|return p_tokens, p_pool, p_mask, pocket_xyz|enzyme_feat, enz_pool, seq_mask|atom_tokens, graph_emb, atom_mask|pocket_tokens, pocket_pool, pocket_mask, pocket_xyz|enzyme_feat, enzyme_pooled, seq_mask" src/model/v4_minimal.py src/model/v4_pocket.py src/model/v4_innovate.py' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "calculate_pocket_weights|calc_interaction_weight|kendalltau|global_metrics|within_group_spearman|within_group_top1_hit|within_group_pair_accuracy|report_all" src' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "ChemicalFeatures|RDConfig|Compose|DataLoader|pytorch_lightning as pl|set_seed|List|Tuple|Any|pickle|Optional|BondType|HybridizationType" src/util/data_load.py src/util/data_module.py src/util/tools.py src/util/metrics.py' in E:\AImodel\DLcatalysis4.0 succeeded in 551ms:
+src\model\ec_cross_attn.py:108:def calculate_pocket_weights(pocket_xyz: torch.Tensor, pocket_mask: torch.Tensor,
+src\model\ec_cross_attn.py:125:def calc_interaction_weight(pocket_xyz: torch.Tensor,
+src\model\ec_cross_attn.py:136:    pocket_w = calculate_pocket_weights(pocket_xyz, pocket_mask)  # (B, K)
+src\util\metrics.py:17:from scipy.stats import spearmanr, kendalltau
+src\util\metrics.py:20:def global_metrics(y_pred: np.ndarray, y_true: np.ndarray) -> dict:
+src\util\metrics.py:48:def within_group_spearman(y_pred: np.ndarray, y_true: np.ndarray,
+src\util\metrics.py:98:def within_group_top1_hit(y_pred: np.ndarray, y_true: np.ndarray,
+src\util\metrics.py:126:def within_group_pair_accuracy(y_pred: np.ndarray, y_true: np.ndarray,
+src\util\metrics.py:166:def report_all(y_pred: np.ndarray,
+src\util\metrics.py:172:    g = global_metrics(y_pred, y_true)
+src\util\metrics.py:177:        ws = within_group_spearman(y_pred, y_true, group_ids)
+src\util\metrics.py:181:        wt1 = within_group_top1_hit(y_pred, y_true, group_ids)
+src\util\metrics.py:185:        wpa = within_group_pair_accuracy(y_pred, y_true, group_ids)
+src\model\v4_innovate.py:49:from model.ec_cross_attn import EnzymeCompoundCrossAttention, calc_interaction_weight
+src\model\v4_innovate.py:51:from util.metrics import report_all
+src\model\v4_innovate.py:293:                    interaction_weight = calc_interaction_weight(
+src\model\v4_innovate.py:438:        all_metrics.update(report_all(pkm, tkm, seq, tag="kcatkm_"))
+src\model\v4_innovate.py:439:        all_metrics.update(report_all(pk, tk, seq, tag="kcat_"))
+src\model\v4_innovate.py:440:        all_metrics.update(report_all(pm, tm, seq, tag="km_"))
+ succeeded in 563ms:
+src/model/v4_innovate.py:220:        return feat, pooled, seq_mask
+src/model/v4_innovate.py:225:            return None, z, None, None
+src/model/v4_innovate.py:230:        atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
+src/model/v4_innovate.py:236:        return atom_tokens, graph_emb, atom_mask, batch
+src/model/v4_innovate.py:262:        return p_tokens, p_pool, p_mask, pocket_xyz
+src/model/v4_innovate.py:280:        atom_tokens, graph_emb, atom_mask, atom_batch = self._encode_substrate(G, B)
+src/model/v4_innovate.py:282:        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz = self._encode_pocket(G, B)
+src/model/v4_pocket.py:211:        return feat, pooled, seq_mask
+src/model/v4_pocket.py:216:            return None, z, None
+src/model/v4_pocket.py:221:        atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
+src/model/v4_pocket.py:227:        return atom_tokens, graph_emb, atom_mask
+src/model/v4_pocket.py:252:        return p_tokens, p_pool, p_mask, pocket_xyz
+src/model/v4_pocket.py:274:        enzyme_feat, enz_pool, seq_mask = self._encode_enzyme(G, B)
+src/model/v4_pocket.py:275:        atom_tokens, graph_emb, atom_mask = self._encode_substrate(G, B)
+src/model/v4_pocket.py:276:        pocket_tokens, pocket_pool, pocket_mask, pocket_xyz = self._encode_pocket(G, B)
+src/model/v4_minimal.py:159:            return enzyme_feat, enzyme_pooled, seq_mask
+src/model/v4_minimal.py:166:        return enzyme_feat, enzyme_pooled, seq_mask
+src/model/v4_minimal.py:169:        """Returns (atom_tokens, graph_emb, atom_mask)."""
+src/model/v4_minimal.py:172:            return None, z, None
+src/model/v4_minimal.py:177:        atom_tokens, graph_emb, atom_mask = self.substrate_gnn(
+ succeeded in 537ms:
+src/util/metrics.py:14:from typing import Dict, List, Sequence
+src/util/tools.py:2:from typing import Dict, Tuple
+src/util/tools.py:10:import pytorch_lightning as pl
+src/util/tools.py:12:def set_seed(seed: int) -> None:
+src/util/tools.py:51:def df_split(df: pd.DataFrame, ratio: Tuple[float, float, float], seed: int, shuffle: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+src/util/tools.py:52:    set_seed(seed=seed)
+src/util/data_module.py:7:  - Optional EC embedding
+src/util/data_module.py:16:import pickle
+src/util/data_module.py:18:from typing import List, Dict, Optional
+src/util/data_module.py:24:import pytorch_lightning as pl
+src/util/data_module.py:26:from torch_geometric.loader import DataLoader
+src/util/data_module.py:35:from util.tools import set_seed
+src/util/data_module.py:132:        # Optional columns for ultimate / innovate models
+src/util/data_module.py:136:        # Multi-task log10 targets (v4-innovate). Any missing → NaN (masked in loss)
+src/util/data_module.py:484:        set_seed(config["train"]["seed"])
+src/util/data_module.py:511:            return DataLoader(
+src/util/data_module.py:516:        return DataLoader(
+src/util/data_module.py:524:        return DataLoader(
+src/util/data_module.py:531:        return DataLoader(
+src/util/data_load.py:3:from typing import Any, List, Tuple, Dict
+exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "attn_pool|def _attn_pool" src/model/int3d_cross_attn.py -A 20 -B 10' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "attn_pool|to_dense_batch|return pocket_tokens, pocket_pool, pocket_mask" src/model/gvp_pocket.py -A 20 -B 10' in E:\AImodel\DLcatalysis4.0exec
+"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -Command 'rg -n "def calculate_metrics|def _prepare_target|def _pairwise_ranking|def _flush_epoch|def _save_results|def configure_optimizers" src/model/v4_minimal.py src/model/v4_pocket.py src/model/v4_ultimate.py -A 12 -B 0' in E:\AImodel\DLcatalysis4.0 succeeded in 434ms:
+15-  pocket_tokens (B, K, D)        — per-residue embeddings for cross-attention
+16-  pocket_pool   (B, D)           — attention-pooled pocket embedding (for y_struct)
+17-  pocket_mask   (B, K) bool      — True = valid residue
+18-"""
+19-from typing import Tuple
+20-
+21-import torch
+22-import torch.nn as nn
+23-import torch.nn.functional as F
+24-from torch_geometric.nn import MessagePassing
+25:from torch_geometric.utils import to_dense_batch
+26-
+27-
+28-def _pairwise_norm(v: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+29-    """Norm along last axis; clamp small values to avoid NaN."""
+30-    return torch.clamp(torch.linalg.norm(v, dim=-1, keepdim=True), min=eps)
+31-
+32-
+33-class GVP(nn.Module):
+34-    """Single Geometric Vector Perceptron layer.
+ succeeded in 475ms:
+181-        super().__init__()
+182-        self.layers = nn.ModuleList([
+183-            Int3DCrossAttnLayer(hidden_dim, n_heads, n_rbf, max_dist, dropout)
+184-            for _ in range(n_layers)
+185-        ])
+186-        self.pool_p = nn.Sequential(
+187-            nn.Linear(hidden_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, 1))
+188-        self.pool_a = nn.Sequential(
+189-            nn.Linear(hidden_dim, hidden_dim), nn.Tanh(), nn.Linear(hidden_dim, 1))
+190-
+191:    def _attn_pool(self, tokens, mask, pool_head):
+192-        scores = pool_head(tokens)
+193-        scores = scores.masked_fill(~mask.unsqueeze(-1),
+194-                                    torch.finfo(scores.dtype).min)
+195-        has_valid = mask.any(dim=1, keepdim=True).unsqueeze(-1).float()
+196-        weights = F.softmax(scores, dim=1) * has_valid
+197-        return (tokens * weights).sum(dim=1)
+198-
+199-    def forward(self, p_tokens, a_tokens, p_mask, a_mask,
+200-                xyz_p=None, xyz_a=None,
+ succeeded in 483ms:
+src/model/v4_ultimate.py:748:    def _prepare_target(self, y_true, stage):
+src/model/v4_ultimate.py-749-        y = y_true.float()
+src/model/v4_ultimate.py-750-        if stage == "train":
+src/model/v4_ultimate.py-751-            noise = self.config["model"].get("label_noise", 0.0)
+src/model/v4_ultimate.py-752-            if noise > 0:
+src/model/v4_ultimate.py-753-                y = y + torch.randn_like(y) * noise
+src/model/v4_ultimate.py-754-        return y
+src/model/v4_ultimate.py-755-
+src/model/v4_ultimate.py:756:    def _pairwise_ranking(self, pred, target, ids, margin, min_diff=0.1, max_pairs=16):
+src/model/v4_ultimate.py-757-        pred = pred.squeeze(-1)
+src/model/v4_ultimate.py-758-        target = target.squeeze() if target.dim() > 1 else target
+src/model/v4_ultimate.py-759-        loss = torch.tensor(0.0, device=self.device)
+src/model/v4_ultimate.py-760-        n_pairs = n_correct = 0
+src/model/v4_ultimate.py-761-        from collections import defaultdict
+src/model/v4_ultimate.py-762-        groups = defaultdict(list)
+src/model/v4_ultimate.py-763-        for i, gid in enumerate(ids):
+src/model/v4_ultimate.py-764-            groups[gid].append(i)
+src/model/v4_ultimate.py-765-        for _, idxs in groups.items():
+src/model/v4_ultimate.py-766-            if len(idxs) < 2:
+src/model/v4_ultimate.py-767-                continue
+codex
+**Cross-File Duplication**
+- The training/eval scaffold is copy-pasted across [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:226>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:351>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:748>): `_prepare_target`, `_pairwise_ranking`, `calculate_metrics`, epoch-buffer flushing, CSV logging, and the cosine-warmup `configure_optimizers` are near-identical. This is the highest-maintenance duplication in scope because any metric/loss change now needs 3 edits and will drift. Suggested replacement: extract a shared `BaseKcatLightningModule` with `common_regression_loss()`, `pairwise_ranking_loss()`, `global_metrics()` delegation, `_flush_epoch_predictions()`, and `build_cosine_warmup_optimizer(config)`; leave each model file owning only branch construction and `forward()`.
+
+- Sequence encoder setup is duplicated in four model files: ProtT5 freeze + `seq_mlp` + attention head + `_init_weights` + masked attention pooling appear in [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:61>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:67>), [src/model/v4_innovate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:87>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:92>). The masking/pooling logic itself repeats again at [v4_minimal:146](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:146>), [v4_pocket:195](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:195>), [v4_innovate:207](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:207>), and [v4_ultimate:294](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:294>). Suggested replacement: a reusable `SequenceEncoder` module returning `(tokens, pooled, mask)` plus a single `masked_attn_pool(tokens, mask, head)` util.
+
+- Substrate graph encoding is duplicated across the same four model files: the `MOL_graph_*` presence checks, `torch.repeat_interleave(...)` batch reconstruction, and `SubstrateGINE(...)` call are repeated in [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:168>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:213>), [src/model/v4_innovate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:222>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:317>). `v4_ultimate` adds RXN-center augmentation, so full consolidation is not appropriate, but the common stem is. Suggested replacement: `encode_substrate_graph(G, device, gnn, hidden_dim)` returning `(atom_tokens, graph_emb, atom_mask, graph_batch)` and let `v4_ultimate` wrap that to inject RXN-center features.
+
+- Pocket encoding is triplicated in [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:229>), [src/model/v4_innovate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:244>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:378>): same `POCKET_*` extraction, same batch reconstruction, same `PocketGVP(...)`, same `to_dense_batch(ca_xyz, batch)`. `v4_ultimate` legitimately extends this with catalytic-residue priors, so the shared part should be factored but the extension kept local. Suggested replacement: `encode_pocket_core(...) -> (tokens, pooled, mask, xyz, batch)` in `model/gvp_pocket.py` or `model/encoders.py`, then let `v4_ultimate` add `cat_dense` afterward.
+
+- Masked attention pooling is reimplemented in three places with the same softmax-over-masked-tokens pattern: [src/model/int3d_cross_attn.py](</E:/AImodel/DLcatalysis4.0/src/model/int3d_cross_attn.py:191>), [src/model/gvp_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/gvp_pocket.py:157>), and the `v4_*` sequence poolers cited above. This is pure duplication; the only variation is mask shape (`(B,K)` vs `(B,K,1)`). Suggested replacement: one utility like `masked_attn_pool(tokens, mask, head, mask_is_bool=True)` in `src/model/module.py` or a new `src/model/pooling.py`.
+
+- `util.metrics.global_metrics()` already computes the same regression metrics that are reimplemented as `calculate_metrics()` in [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:318>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:437>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:856>). Keeping both versions guarantees drift. Suggested replacement: import and use `from util.metrics import global_metrics`, then either return that dict directly or wrap it once for Lightning logging.
+
+**Dead Code**
+- [src/model/module.py](</E:/AImodel/DLcatalysis4.0/src/model/module.py:10>) contains a large legacy utility block that is unused anywhere else in `src/`: `split_tensor_by_batch`, `concat_tensors_to_batch`, `split_tensor_to_segments`, `split_tensor_by_lengths`, `batch_intersection_mask`, `MeanReadout`, `SumReadout`, `SmoothCrossEntropyLoss`, `GaussianSmearing`, `SinRBF`, `ShiftedSoftplus`, `compose_context`, `compose_batch_context`, and `get_complete_graph`. The only symbol referenced elsewhere in scope is `compose_context_stable`, via the local self-test at [module.py:362](</E:/AImodel/DLcatalysis4.0/src/model/module.py:362>). Suggested replacement: delete the unused exports, or move still-wanted legacy pieces to `archive/legacy_module.py` so `module.py` only contains actively used primitives (`MLP`, maybe `compose_context_stable`).
+
+- [src/util/data_load.py](</E:/AImodel/DLcatalysis4.0/src/util/data_load.py:99>) appears to carry a second, now-orphaned structure pipeline inside the active package. `StructureComplexData`, `padding_struct_lig_embedding`, `PDBProtein`, and `parse_sdf_file_mol` have no references anywhere else under `src/`; only `SequenceData` and `padding_seq_embedding` are used by [src/util/data_module.py](</E:/AImodel/DLcatalysis4.0/src/util/data_module.py:36>) and [src/util/seq_process.py](</E:/AImodel/DLcatalysis4.0/src/util/seq_process.py:11>). Suggested replacement: split `data_load.py` into `seq_data.py` for the live sequence path and move the dormant structure-prep code to a script-only module under `scripts/` or `src/util/legacy_structure.py`.
+
+- `v4_minimal` and `v4_pocket` compute and return encoder outputs that are immediately discarded. In [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:205>) `enzyme_feat`, `seq_mask`, `atom_tokens`, and `atom_mask` are unused in `forward`; in [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:274>) `enzyme_feat` and `seq_mask` are also unused. This is local dead dataflow, and it obscures which tensors actually matter. Suggested replacement: have `v4_minimal._encode_enzyme()` return just `enzyme_pooled`, `v4_minimal._encode_substrate()` return just `graph_emb`, and in `v4_pocket.forward()` bind `_` for unused values or split “token” and “pooled” encoder variants.
+
+- [src/util/data_load.py](</E:/AImodel/DLcatalysis4.0/src/util/data_load.py:1>) has several dead imports in live code: `set_seed`, `pytorch_lightning as pl`, `Compose`, `DataLoader`, and typing names `List`/`Tuple` are not used; `ChemicalFeatures` and `RDConfig` only survive in commented-out code at [data_load.py:364](</E:/AImodel/DLcatalysis4.0/src/util/data_load.py:364>). [src/util/data_module.py](</E:/AImodel/DLcatalysis4.0/src/util/data_module.py:16>) likewise imports unused `pickle`, `List`, `Dict`, and `Optional`; [src/util/metrics.py](</E:/AImodel/DLcatalysis4.0/src/util/metrics.py:14>) imports unused `Dict`, `List`, and `kendalltau`. Suggested replacement: delete the dead imports and either remove the commented RDKit feature-factory block or move it to a dedicated archival note.
+
+**Top 5 Refactors**
+1. Extract a shared Lightning base class for loss/metrics/logging/scheduler used by `v4_minimal`, `v4_pocket`, and `v4_ultimate`.
+2. Create reusable encoder modules for sequence, substrate, and pocket paths instead of re-implementing `_encode_*` in every `v4_*` file.
+3. Replace all hand-written masked attention pooling with one shared `masked_attn_pool(...)` utility.
+4. Prune `src/model/module.py` down to actually used symbols and move legacy helpers elsewhere.
+5. Split `src/util/data_load.py` into active sequence utilities vs archived structure-prep code so the live dataloading surface matches the current project.
+tokens used
+137,457
+**Cross-File Duplication**
+- The training/eval scaffold is copy-pasted across [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:226>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:351>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:748>): `_prepare_target`, `_pairwise_ranking`, `calculate_metrics`, epoch-buffer flushing, CSV logging, and the cosine-warmup `configure_optimizers` are near-identical. This is the highest-maintenance duplication in scope because any metric/loss change now needs 3 edits and will drift. Suggested replacement: extract a shared `BaseKcatLightningModule` with `common_regression_loss()`, `pairwise_ranking_loss()`, `global_metrics()` delegation, `_flush_epoch_predictions()`, and `build_cosine_warmup_optimizer(config)`; leave each model file owning only branch construction and `forward()`.
+
+- Sequence encoder setup is duplicated in four model files: ProtT5 freeze + `seq_mlp` + attention head + `_init_weights` + masked attention pooling appear in [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:61>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:67>), [src/model/v4_innovate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:87>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:92>). The masking/pooling logic itself repeats again at [v4_minimal:146](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:146>), [v4_pocket:195](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:195>), [v4_innovate:207](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:207>), and [v4_ultimate:294](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:294>). Suggested replacement: a reusable `SequenceEncoder` module returning `(tokens, pooled, mask)` plus a single `masked_attn_pool(tokens, mask, head)` util.
+
+- Substrate graph encoding is duplicated across the same four model files: the `MOL_graph_*` presence checks, `torch.repeat_interleave(...)` batch reconstruction, and `SubstrateGINE(...)` call are repeated in [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:168>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:213>), [src/model/v4_innovate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:222>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:317>). `v4_ultimate` adds RXN-center augmentation, so full consolidation is not appropriate, but the common stem is. Suggested replacement: `encode_substrate_graph(G, device, gnn, hidden_dim)` returning `(atom_tokens, graph_emb, atom_mask, graph_batch)` and let `v4_ultimate` wrap that to inject RXN-center features.
+
+- Pocket encoding is triplicated in [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:229>), [src/model/v4_innovate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_innovate.py:244>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:378>): same `POCKET_*` extraction, same batch reconstruction, same `PocketGVP(...)`, same `to_dense_batch(ca_xyz, batch)`. `v4_ultimate` legitimately extends this with catalytic-residue priors, so the shared part should be factored but the extension kept local. Suggested replacement: `encode_pocket_core(...) -> (tokens, pooled, mask, xyz, batch)` in `model/gvp_pocket.py` or `model/encoders.py`, then let `v4_ultimate` add `cat_dense` afterward.
+
+- Masked attention pooling is reimplemented in three places with the same softmax-over-masked-tokens pattern: [src/model/int3d_cross_attn.py](</E:/AImodel/DLcatalysis4.0/src/model/int3d_cross_attn.py:191>), [src/model/gvp_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/gvp_pocket.py:157>), and the `v4_*` sequence poolers cited above. This is pure duplication; the only variation is mask shape (`(B,K)` vs `(B,K,1)`). Suggested replacement: one utility like `masked_attn_pool(tokens, mask, head, mask_is_bool=True)` in `src/model/module.py` or a new `src/model/pooling.py`.
+
+- `util.metrics.global_metrics()` already computes the same regression metrics that are reimplemented as `calculate_metrics()` in [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:318>), [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:437>), and [src/model/v4_ultimate.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_ultimate.py:856>). Keeping both versions guarantees drift. Suggested replacement: import and use `from util.metrics import global_metrics`, then either return that dict directly or wrap it once for Lightning logging.
+
+**Dead Code**
+- [src/model/module.py](</E:/AImodel/DLcatalysis4.0/src/model/module.py:10>) contains a large legacy utility block that is unused anywhere else in `src/`: `split_tensor_by_batch`, `concat_tensors_to_batch`, `split_tensor_to_segments`, `split_tensor_by_lengths`, `batch_intersection_mask`, `MeanReadout`, `SumReadout`, `SmoothCrossEntropyLoss`, `GaussianSmearing`, `SinRBF`, `ShiftedSoftplus`, `compose_context`, `compose_batch_context`, and `get_complete_graph`. The only symbol referenced elsewhere in scope is `compose_context_stable`, via the local self-test at [module.py:362](</E:/AImodel/DLcatalysis4.0/src/model/module.py:362>). Suggested replacement: delete the unused exports, or move still-wanted legacy pieces to `archive/legacy_module.py` so `module.py` only contains actively used primitives (`MLP`, maybe `compose_context_stable`).
+
+- [src/util/data_load.py](</E:/AImodel/DLcatalysis4.0/src/util/data_load.py:99>) appears to carry a second, now-orphaned structure pipeline inside the active package. `StructureComplexData`, `padding_struct_lig_embedding`, `PDBProtein`, and `parse_sdf_file_mol` have no references anywhere else under `src/`; only `SequenceData` and `padding_seq_embedding` are used by [src/util/data_module.py](</E:/AImodel/DLcatalysis4.0/src/util/data_module.py:36>) and [src/util/seq_process.py](</E:/AImodel/DLcatalysis4.0/src/util/seq_process.py:11>). Suggested replacement: split `data_load.py` into `seq_data.py` for the live sequence path and move the dormant structure-prep code to a script-only module under `scripts/` or `src/util/legacy_structure.py`.
+
+- `v4_minimal` and `v4_pocket` compute and return encoder outputs that are immediately discarded. In [src/model/v4_minimal.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_minimal.py:205>) `enzyme_feat`, `seq_mask`, `atom_tokens`, and `atom_mask` are unused in `forward`; in [src/model/v4_pocket.py](</E:/AImodel/DLcatalysis4.0/src/model/v4_pocket.py:274>) `enzyme_feat` and `seq_mask` are also unused. This is local dead dataflow, and it obscures which tensors actually matter. Suggested replacement: have `v4_minimal._encode_enzyme()` return just `enzyme_pooled`, `v4_minimal._encode_substrate()` return just `graph_emb`, and in `v4_pocket.forward()` bind `_` for unused values or split “token” and “pooled” encoder variants.
+
+- [src/util/data_load.py](</E:/AImodel/DLcatalysis4.0/src/util/data_load.py:1>) has several dead imports in live code: `set_seed`, `pytorch_lightning as pl`, `Compose`, `DataLoader`, and typing names `List`/`Tuple` are not used; `ChemicalFeatures` and `RDConfig` only survive in commented-out code at [data_load.py:364](</E:/AImodel/DLcatalysis4.0/src/util/data_load.py:364>). [src/util/data_module.py](</E:/AImodel/DLcatalysis4.0/src/util/data_module.py:16>) likewise imports unused `pickle`, `List`, `Dict`, and `Optional`; [src/util/metrics.py](</E:/AImodel/DLcatalysis4.0/src/util/metrics.py:14>) imports unused `Dict`, `List`, and `kendalltau`. Suggested replacement: delete the dead imports and either remove the commented RDKit feature-factory block or move it to a dedicated archival note.
+
+**Top 5 Refactors**
+1. Extract a shared Lightning base class for loss/metrics/logging/scheduler used by `v4_minimal`, `v4_pocket`, and `v4_ultimate`.
+2. Create reusable encoder modules for sequence, substrate, and pocket paths instead of re-implementing `_encode_*` in every `v4_*` file.
+3. Replace all hand-written masked attention pooling with one shared `masked_attn_pool(...)` utility.
+4. Prune `src/model/module.py` down to actually used symbols and move legacy helpers elsewhere.
+5. Split `src/util/data_load.py` into active sequence utilities vs archived structure-prep code so the live dataloading surface matches the current project.

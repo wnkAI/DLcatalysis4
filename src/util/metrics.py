@@ -161,6 +161,57 @@ def within_group_pair_accuracy(y_pred: np.ndarray, y_true: np.ndarray,
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Reaction-orphan retrieval (Horizyn-1 PNAS 2026 baseline)
+# ──────────────────────────────────────────────────────────────────────
+def top_k_recall_per_reaction(y_pred: np.ndarray,
+                              reaction_ids: Sequence[str],
+                              enzyme_ids: Sequence[str],
+                              true_active_pairs: set,
+                              k_values: Sequence[int] = (1, 5, 10, 50)) -> dict:
+    """Top-K enzyme retrieval recall, grouped by reaction.
+
+    For each reaction R appearing in `reaction_ids`, all rows with that R
+    form a candidate enzyme list; we sort them by `y_pred` (descending)
+    and check whether any enzyme that actually catalyzes R (according to
+    `true_active_pairs`) is in the top-K.
+
+    `true_active_pairs` is a set of `(reaction_id, enzyme_id)` tuples that
+    define the ground-truth catalysis matrix; usually this is just the
+    set of (R, E) pairs observed in the orphan_test split with finite
+    measured kcat/Km, but the caller can construct it however makes
+    sense.
+
+    A reaction is excluded if it has no positive enzymes in the
+    candidate list (otherwise recall is trivially 0).
+    """
+    yp = np.asarray(y_pred).ravel()
+    assert len(yp) == len(reaction_ids) == len(enzyme_ids)
+    by_rxn: dict = defaultdict(list)
+    for i, rxn in enumerate(reaction_ids):
+        if not np.isfinite(yp[i]):
+            continue
+        by_rxn[rxn].append((yp[i], enzyme_ids[i]))
+
+    out = {f"top{k}_recall": [] for k in k_values}
+    n_eval = 0
+    for rxn, items in by_rxn.items():
+        positives = {enz for r, enz in true_active_pairs if r == rxn}
+        if not positives:
+            continue
+        items_sorted = sorted(items, key=lambda x: -x[0])
+        ranked_enz = [e for _, e in items_sorted]
+        n_eval += 1
+        for k in k_values:
+            top_k = set(ranked_enz[:k])
+            out[f"top{k}_recall"].append(float(bool(top_k & positives)))
+
+    return {
+        **{m: float(np.mean(v)) if v else float("nan") for m, v in out.items()},
+        "n_reactions_eval": int(n_eval),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Unified reporter
 # ──────────────────────────────────────────────────────────────────────
 def report_all(y_pred: np.ndarray,

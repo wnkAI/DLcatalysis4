@@ -1,0 +1,62 @@
+Loaded cached credentials.
+Here is the code hygiene and redundancy audit for the provided train and scripts pipeline files.
+
+## Duplication
+- **Vina subprocess wrappers:** `scripts/20_run_vina_gpu.py` implements `run_qvina2` and `run_vina_gpu`. They are 90% identical, duplicating the CLI argument list building, `subprocess.run` execution, log writing, and stdout parsing.
+  *Why it matters:* Any future changes to docking error handling or log parsing will need to be made in two places.
+  *Suggested replacement:* Consolidate into a single `run_docking(binary, receptor, ligand, center, size, exhaustiveness, out_pdbqt, log_path, **kwargs)` that dynamically adds `--cpu` or `--seed` based on the binary name.
+- **Atomic file writers:** `scripts/24_pair_pipeline.py` implements both `atomic_write_bytes` and `atomic_torch_save`. Both do the exact same `.tmp` file creation and `os.replace` dance.
+  *Why it matters:* Unnecessary boilerplate.
+  *Suggested replacement:* Use a single context manager (or a generic `atomic_write(path, obj, writer_func)`) to handle the temp-file-to-target replacement safely.
+
+## Over-engineered abstractions
+- **The `importlib` sibling hack:** `scripts/24_pair_pipeline.py` uses `importlib.util.spec_from_file_location` to dynamically load `14_extract_pockets.py` because Python module names cannot start with a digit.
+  *Why it matters:* It breaks IDE tooling, static analysis, and linting. It's a brittle way to share code.
+  *Suggested replacement:* Rename the pipeline scripts to valid Python identifiers (e.g., `step14_extract_pockets.py` or `s14_extract.py`) and use standard `import step14_extract_pockets as _pock`.
+- **Lazy BioPython imports:** `scripts/14_extract_pockets.py` uses a `_import_bio()` factory function called inside `pocket_tier1_ligand`, `pocket_tier2_annot`, etc., to allow "syntax-check on machines without biopython".
+  *Why it matters:* Adds runtime overhead to every function call and clutters the logic. Since this is an explicit pipeline script that *requires* BioPython to run those branches, failing fast at the top level is preferred.
+  *Suggested replacement:* Move `from Bio.PDB import MMCIFParser, PDBParser, NeighborSearch` to the top of the file. If it *must* be optional, wrap the top-level import in `try/except ImportError:` and set a module-level `BIO_AVAILABLE` flag.
+- **`_safe_idx` dictionary wrapper:** `scripts/11_precompute_mol_graphs.py` defines `def _safe_idx(mapping, key, default=0): return mapping.get(key, default)`.
+  *Why it matters:* It's a completely redundant wrapper around standard Python dictionary behavior.
+  *Suggested replacement:* Inline it. Use `HYBRID_TO_IDX.get(atom.GetHybridization(), 2)`.
+
+## Verbose / non-idiomatic Python
+- **EC Number Parsing:** `parse_ec` in `scripts/10_prepare_model_inputs.py` uses a verbose `for` loop with `try/except ValueError` for list indexing and conversion.
+  *Why it matters:* It takes 10 lines to do what a standard Python list comprehension handles safely in 2 lines.
+  *Suggested replacement:*
+  ```python
+  def parse_ec(ec_str: str) -> tuple[int, int, int, int]:
+      parts = [int(p) if p.isdigit() else 0 for p in (ec_str or "").split(".")]
+      return tuple((parts + [0, 0, 0, 0])[:4])
+  ```
+- **Tensor Padding:** `_pad_nodes` inside `scripts/14_extract_pockets.py` manually creates padded tensors by allocating a new `torch.full` block, extracting `x.dtype`, and concatenating.
+  *Why it matters:* PyTorch has highly optimized C++ ops for this, and manually checking shapes/dtypes is non-idiomatic.
+  *Suggested replacement:* Use PyTorch's native padding or at least the `new_full` constructor:
+  ```python
+  def _pad_nodes(x, target_len, fill=0.0):
+      pad_len = target_len - x.shape[0]
+      if pad_len <= 0: return x[:target_len]
+      return torch.cat([x, x.new_full((pad_len,) + x.shape[1:], fill)], dim=0)
+  ```
+- **Local numpy import:** `scripts/11_precompute_mol_graphs.py` does `import numpy as np` inside `smiles_to_graph`.
+  *Why it matters:* `numpy` is already imported at the top of the file. The comment `# local import to keep function self-contained` is an anti-pattern in a script that already relies on module-level imports.
+
+## Redundant "safety" logic
+- **Double-wrapped annotation parsing:** `parse_annotation_sites_safe` in `scripts/24_pair_pipeline.py` checks `if site_string is None: return set()` and wraps the call in a broad try/except.
+  *Why it matters:* `scripts/14_extract_pockets.py`'s `parse_annotation_sites` *already* explicitly checks `if not isinstance(site_string, str) or not site_string.strip(): return []` and contains internal try/excepts for parsing.
+  *Suggested replacement:* Drop `parse_annotation_sites_safe` entirely and just call `set(_pock.parse_annotation_sites(site_string))`.
+
+## Stale designs & Dead code
+- **Split fpocket logic:** `scripts/14_extract_pockets.py` has `pocket_tier3_fpocket` which raises a `NotImplementedError` claiming fpocket integration is a stub to be added later. However, `scripts/20_run_vina_gpu.py` actually *implements* a working `run_fpocket` subprocess call.
+  *Why it matters:* The domain logic for pocket resolution is fragmented. Script 20 calculates the fpocket center to run Vina, but Script 14's extraction code thinks it doesn't exist.
+  *Suggested replacement:* Relocate `run_fpocket` to `scripts/14_extract_pockets.py` to fulfill the `pocket_tier3_fpocket` stub, and have script 20 import it from there.
+
+---
+
+### Top 5 Refactors Worth Doing
+
+1. **Resolve the `importlib` sibling hack.** Rename the pipeline scripts (e.g., `s14_extract_pockets.py` or `step14_...`) so they can be imported naturally via `import s14_extract_pockets`. This immediately improves codebase navigability and allows linters/type-checkers to work across the pipeline.
+2. **Unify `fpocket` and box center logic.** Stop stubbing fpocket in script 14 while implementing it in script 20. Consolidate all protein pocket/box center structural resolution into `scripts/14_extract_pockets.py` and share it.
+3. **Consolidate Vina subprocess runners.** Merge `run_qvina2` and `run_vina_gpu` in `scripts/20_run_vina_gpu.py` into a single parameterized `run_docking()` function to ensure CLI execution and parsing logic doesn't drift between CPU and GPU branches.
+4. **Clean up verbose data munging.** Replace `parse_ec` in script 10 with the 2-line comprehension, and strip out the `_safe_idx` wrapper in script 11 in favor of standard `.get()`.
+5. **Hoist BioPython imports.** Remove the `_import_bio()` lazy loader pattern in `scripts/14_extract_pockets.py` and import the components normally at the top of the file to remove runtime overhead and visual clutter from the core domain functions.

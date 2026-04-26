@@ -1,0 +1,255 @@
+Loaded cached credentials.
+Attempt 1 failed with status 429. Retrying with backoff... GaxiosError: [{
+  "error": {
+    "code": 429,
+    "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+    "errors": [
+      {
+        "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+        "domain": "global",
+        "reason": "rateLimitExceeded"
+      }
+    ],
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "MODEL_CAPACITY_EXHAUSTED",
+        "domain": "cloudcode-pa.googleapis.com",
+        "metadata": {
+          "model": "gemini-3.1-pro-preview"
+        }
+      }
+    ]
+  }
+}
+]
+    at Gaxios._request (C:\Users\wnkfr\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\gaxios\build\src\gaxios.js:142:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async OAuth2Client.requestAsync (C:\Users\wnkfr\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\google-auth-library\build\src\auth\oauth2client.js:429:18)
+    at async CodeAssistServer.requestStreamingPost (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:262:21)
+    at async CodeAssistServer.generateContentStream (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:54:27)
+    at async file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:285:26
+    at async file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/telemetry/trace.js:81:20
+    at async retryWithBackoff (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:130:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:440:32)
+    at async GeminiChat.streamWithRetries (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:266:40) {
+  config: {
+    url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+    method: 'POST',
+    params: { alt: 'sse' },
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'GeminiCLI/0.34.0/gemini-3.1-pro-preview (win32; x64) google-api-nodejs-client/9.15.1',
+      Authorization: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      'x-goog-api-client': 'gl-node/24.14.0'
+    },
+    responseType: 'stream',
+    body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+    signal: AbortSignal { aborted: false },
+    retry: false,
+    paramsSerializer: [Function: paramsSerializer],
+    validateStatus: [Function: validateStatus],
+    errorRedactor: [Function: defaultErrorRedactor]
+  },
+  response: {
+    config: {
+      url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+      method: 'POST',
+      params: [Object],
+      headers: [Object],
+      responseType: 'stream',
+      body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      signal: [AbortSignal],
+      retry: false,
+      paramsSerializer: [Function: paramsSerializer],
+      validateStatus: [Function: validateStatus],
+      errorRedactor: [Function: defaultErrorRedactor]
+    },
+    data: '[{\n' +
+      '  "error": {\n' +
+      '    "code": 429,\n' +
+      '    "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '    "errors": [\n' +
+      '      {\n' +
+      '        "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '        "domain": "global",\n' +
+      '        "reason": "rateLimitExceeded"\n' +
+      '      }\n' +
+      '    ],\n' +
+      '    "status": "RESOURCE_EXHAUSTED",\n' +
+      '    "details": [\n' +
+      '      {\n' +
+      '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+      '        "reason": "MODEL_CAPACITY_EXHAUSTED",\n' +
+      '        "domain": "cloudcode-pa.googleapis.com",\n' +
+      '        "metadata": {\n' +
+      '          "model": "gemini-3.1-pro-preview"\n' +
+      '        }\n' +
+      '      }\n' +
+      '    ]\n' +
+      '  }\n' +
+      '}\n' +
+      ']',
+    headers: {
+      'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000',
+      'content-length': '630',
+      'content-type': 'application/json; charset=UTF-8',
+      date: 'Fri, 24 Apr 2026 09:53:01 GMT',
+      server: 'ESF',
+      'server-timing': 'gfet4t7; dur=102',
+      vary: 'Origin, X-Origin, Referer',
+      'x-cloudaicompanion-trace-id': '63ac86a6d3a8be8a',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+      'x-xss-protection': '0'
+    },
+    status: 429,
+    statusText: 'Too Many Requests',
+    request: {
+      responseURL: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse'
+    }
+  },
+  error: undefined,
+  status: 429,
+  Symbol(gaxios-gaxios-error): '6.7.1'
+}
+Attempt 2 failed with status 429. Retrying with backoff... GaxiosError: [{
+  "error": {
+    "code": 429,
+    "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+    "errors": [
+      {
+        "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+        "domain": "global",
+        "reason": "rateLimitExceeded"
+      }
+    ],
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "MODEL_CAPACITY_EXHAUSTED",
+        "domain": "cloudcode-pa.googleapis.com",
+        "metadata": {
+          "model": "gemini-3.1-pro-preview"
+        }
+      }
+    ]
+  }
+}
+]
+    at Gaxios._request (C:\Users\wnkfr\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\gaxios\build\src\gaxios.js:142:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async OAuth2Client.requestAsync (C:\Users\wnkfr\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\google-auth-library\build\src\auth\oauth2client.js:429:18)
+    at async CodeAssistServer.requestStreamingPost (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:262:21)
+    at async CodeAssistServer.generateContentStream (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:54:27)
+    at async file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:285:26
+    at async file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/telemetry/trace.js:81:20
+    at async retryWithBackoff (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:130:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:440:32)
+    at async GeminiChat.streamWithRetries (file:///C:/Users/wnkfr/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:266:40) {
+  config: {
+    url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+    method: 'POST',
+    params: { alt: 'sse' },
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'GeminiCLI/0.34.0/gemini-3.1-pro-preview (win32; x64) google-api-nodejs-client/9.15.1',
+      Authorization: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      'x-goog-api-client': 'gl-node/24.14.0'
+    },
+    responseType: 'stream',
+    body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+    signal: AbortSignal { aborted: false },
+    retry: false,
+    paramsSerializer: [Function: paramsSerializer],
+    validateStatus: [Function: validateStatus],
+    errorRedactor: [Function: defaultErrorRedactor]
+  },
+  response: {
+    config: {
+      url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+      method: 'POST',
+      params: [Object],
+      headers: [Object],
+      responseType: 'stream',
+      body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      signal: [AbortSignal],
+      retry: false,
+      paramsSerializer: [Function: paramsSerializer],
+      validateStatus: [Function: validateStatus],
+      errorRedactor: [Function: defaultErrorRedactor]
+    },
+    data: '[{\n' +
+      '  "error": {\n' +
+      '    "code": 429,\n' +
+      '    "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '    "errors": [\n' +
+      '      {\n' +
+      '        "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '        "domain": "global",\n' +
+      '        "reason": "rateLimitExceeded"\n' +
+      '      }\n' +
+      '    ],\n' +
+      '    "status": "RESOURCE_EXHAUSTED",\n' +
+      '    "details": [\n' +
+      '      {\n' +
+      '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+      '        "reason": "MODEL_CAPACITY_EXHAUSTED",\n' +
+      '        "domain": "cloudcode-pa.googleapis.com",\n' +
+      '        "metadata": {\n' +
+      '          "model": "gemini-3.1-pro-preview"\n' +
+      '        }\n' +
+      '      }\n' +
+      '    ]\n' +
+      '  }\n' +
+      '}\n' +
+      ']',
+    headers: {
+      'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000',
+      'content-length': '630',
+      'content-type': 'application/json; charset=UTF-8',
+      date: 'Fri, 24 Apr 2026 09:53:07 GMT',
+      server: 'ESF',
+      'server-timing': 'gfet4t7; dur=46',
+      vary: 'Origin, X-Origin, Referer',
+      'x-cloudaicompanion-trace-id': '29a88ebc09ebefa6',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+      'x-xss-protection': '0'
+    },
+    status: 429,
+    statusText: 'Too Many Requests',
+    request: {
+      responseURL: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse'
+    }
+  },
+  error: undefined,
+  status: 429,
+  Symbol(gaxios-gaxios-error): '6.7.1'
+}
+### Idea 1: Learned Reaction Transformer (Replacing static DRFP)
+*   **What to change:** Swap the static, hash-based `y_rxn` (DRFP) for a lightweight transformer over reaction SMILES (e.g., a frozen or LoRA-tuned ChemBERTa/RxnRoBERTa), mimicking Horizyn-1's reaction encoder.
+*   **Why it's worth it:** DRFP relies on static substructure counting. A learned transformer captures dynamic atom-mapping, stereochemistry, and functional group transformations natively, which is critical for distinguishing subtle kcat differences in non-natural or promiscuous reactions.
+*   **Trade-off:** High. Replaces a cheap 2048-d vector with a heavy self-attention forward pass. Substantially increases VRAM usage and risks overfitting on a ~30k regression dataset without massive pre-training. 
+*   **Verdict:** **LATER.** The compute and engineering costs are too steep for a mid-version update unless DRFP is demonstrably bottlenecking your OOD substrate performance.
+
+### Idea 2: Symmetric Contrastive Auxiliary Loss (InfoNCE)
+*   **What to change:** Add an InfoNCE loss term explicitly aligning the unimodal enzyme embedding (`y_seq`) and the unimodal reaction embedding (`y_sub` + `y_rxn`) *before* they enter the cross-attention (`y_int3d`) and fusion MLP.
+*   **Why it's worth it:** It acts as a powerful regularizer. Forcing the isolated encoders into a globally aligned shared latent space ensures that baseline catalytic compatibility is learned robustly, preventing the highly-parameterized multi-modal fusion layers from memorizing noise. Excellent for OOD generalization.
+*   **Trade-off:** Low compute, moderate engineering. Requires implementing in-batch negative sampling and hyperparameter tuning to balance $\lambda_{contrastive}$ against your existing logcosh and pairwise ranking losses.
+*   **Verdict:** **YES.** It maximizes the feature quality of your individual branches almost for free.
+
+### Idea 3: Explicit Cosine Similarity Feature in Fusion
+*   **What to change:** Project the independent enzyme and reaction embeddings into a shared dimension, compute their cosine similarity (Horizyn-1's exact retrieval metric), and feed this single scalar directly into your final regression MLP alongside the pooled vectors.
+*   **Why it's worth it:** Horizyn-1 proves this dot-product is highly predictive of basic catalysis. Explicitly passing this "compatibility score" to the regression head provides a massive shortcut, freeing up the complex structural modules (`y_int3d`, `y_struct`) to focus entirely on precision kinetic fine-tuning rather than having to relearn basic binding feasibility.
+*   **Trade-off:** Negligible. Costs a couple of linear layers, one dot-product, and practically zero engineering hours.
+*   **Verdict:** **YES.** It is the cheapest, most direct way to steal Horizyn-1's core signal for your regression task.
+
+### What NOT to copy: The Pure Dual-Encoder (Late-Interaction) Architecture
+Do not abandon your deep cross-attention (`y_int3d`) or structural (`y_struct`) modules to adopt Horizyn-1's strictly independent encoders. Horizyn-1 forces a late-interaction (dot product only) bottleneck because they *must* pre-compute embeddings for ultra-fast, million-scale vector retrieval. We are doing precision regression on pre-selected pairs; dropping early-interaction structural modeling (like pocket-substrate distance matrices) would destroy the mechanistic and spatial inductive biases absolutely required to predict continuous `kcat/Km` values.
+
+***
+
+**Strongest recommendation:** Implement the InfoNCE auxiliary loss on your unimodal branches to force a globally aligned representation space, providing a strong regularization prior before your heavy cross-modal fusion takes over.

@@ -1,0 +1,80 @@
+# Claude's independent take
+
+## Idea 1 — Orphan-reaction held-out evaluation (+ Top-K recall alongside regression)
+
+**What to add/change.** A new split in `scripts/13_make_cv_splits.py`
+(or a separate evaluation script) that produces `orphan_test.csv`: all
+pairs whose reaction SMILES never appear in the train set. Report two
+numbers on this split: (a) our existing regression MSE / PCC / SCC,
+(b) Top-K recall — for each orphan reaction, does the correct enzyme
+rank in the top-K of all train enzymes by our predicted `kcat/Km`?
+
+**Why worth it.** Horizyn-1's entire selling point is 75% Top-10 on
+orphan reactions. Any PNAS-adjacent reviewer reading our paper will
+ask "what about unseen reactions?" If we don't pre-compute this, we
+get BLOCK'ed. And if we do, and we match or beat them on the same
+benchmark + also give a calibrated log-kcat, that's a stronger paper
+than "we just predict kcat better."
+
+**Trade-off.** Zero training cost. 1 day of scripting + a careful
+reaction-SMILES dedupe (atom-mapped canonicalization). Risk: our
+training data may already leak orphans through substrate-only overlap
+if we split naively; need to dedupe on reaction-template level too.
+
+**Verdict: YES.** Evaluation changes are the cheapest lever.
+
+## Idea 2 — InfoNCE auxiliary loss on (enz_pool, rxn_emb)
+
+**What to add/change.** In `V4Ultimate.get_loss`, add a symmetric
+InfoNCE term over the batch: positive pair = the sample's own
+(enz_fused, rxn_emb); negatives = all other samples' `rxn_emb` /
+`enz_fused`. Scale by a small λ (0.05–0.1). Keep regression as primary.
+
+**Why worth it.** Our current ranking loss only sees enzyme-internal
+comparisons (same enzyme × different substrates). InfoNCE sees
+cross-batch negatives, which penalizes the model for producing
+enzyme and reaction embeddings that can't be distinguished by
+compatibility. It's exactly what Horizyn-1 trains end-to-end.
+
+**Trade-off.** Few hours engineering. Minimal compute (dot-product
+over B×B). Risk: our batch size is only 10 in config, so negatives
+are weak; may need to increase batch or use a memory-bank trick.
+
+**Verdict: YES.**
+
+## Idea 3 — Explicit "compatibility" scalar feeding the regression head
+
+**What to add/change.** Compute `cos(enz_pool, rxn_emb_proj)` once
+(after L2 normalizing both), multiply by a learnable scale, and
+concatenate with the existing `pair_delta = y_sub + y_rxn + y_int3d`
+input to `head_seq`'s residual. Essentially: "baseline compatibility"
+feeds as a prior into the predictor.
+
+**Why worth it.** Horizyn-1 demonstrated the dot-product alone is
+predictive of coarse catalysis. Our big cross-attn modules then don't
+have to re-learn "is this a plausible combination"; they can focus
+on kinetics. Cheap inductive bias.
+
+**Trade-off.** ~4 new parameters (projection + scale). Requires the
+two embeddings to live in a compatible space, which may need a
+learned projection of `rxn_emb`.
+
+**Verdict: LATER** — only adopt if Idea 2 doesn't already implicitly
+make the cosine feature visible through the InfoNCE gradient.
+
+## What NOT to copy
+
+**The separate-unimodal-encoder / late-interaction architecture.**
+Horizyn-1 forces a dot-product bottleneck because retrieval requires
+pre-embedding all 4.7k proteins once and then comparing a new
+reaction at inference in milliseconds. We are per-pair regressing
+kcat/Km on known pairs, not retrieving from a pool. Our int3d
+cross-attention with per-residue × per-atom distance bias is
+exactly what they sacrificed for speed. Replicating their setup
+would destroy the structural inductive bias that is the point of v4.
+
+---
+
+**Strongest single recommendation.** Add the orphan-reaction
+evaluation split before adding any architectural change — otherwise
+we'll refactor to chase a metric we haven't measured yet.

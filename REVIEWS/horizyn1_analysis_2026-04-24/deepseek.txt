@@ -1,0 +1,35 @@
+## Idea 1: Add InfoNCE as a within-batch auxiliary loss for enzyme-substrate pairs
+
+**What:** Add a symmetric contrastive loss (InfoNCE) on the batch level, treating each (enzyme, substrate) pair as a positive and all other combinations in the batch as negatives. Compute this on the final scalar prediction `pred` (or a learned embedding before the regression head), not on separate encoder outputs.
+
+**Why:** Within-enzyme SCC (substrate cross-correlation) is exactly what InfoNCE penalizes: it forces the model to distinguish which substrate goes with which enzyme, even when multiple substrates have similar catalytic efficiencies. This directly addresses the within-enzyme ranking objective you already have, but with a harder, more structured negative sampling (all batch negatives vs. random pairs).
+
+**Trade-off:** ~2% compute overhead (one extra loss term + temperature scaling). No data changes. Engineering: 2-3 hours to implement and tune temperature. Risk: if batch size is small (<64), negatives are weak.
+
+**Verdict:** YES — cheap, directly targets within-enzyme discrimination, and synergizes with your existing pairwise ranking loss.
+
+## Idea 2: Dual-encoder with shared latent space for reaction and protein, then project to scalar
+
+**What:** Add a lightweight dual-encoder branch (small Transformer on reaction SMILES + frozen PLM embedding for enzyme) that produces a cosine similarity score. Concatenate this similarity with your existing `y_seq + y_sub + y_rxn + y_int3d` features before the final regression MLP. Train end-to-end with regression loss.
+
+**Why:** The dual-encoder captures global reaction-enzyme compatibility that your current per-modality features might miss (e.g., a reaction class that maps to a whole enzyme family). This is complementary to your fine-grained 3D interaction features. It does NOT break regression — the cosine similarity is just another feature.
+
+**Trade-off:** Need to train a reaction encoder (small Transformer, ~10M params). Adds ~5% compute. Engineering: 1-2 weeks to implement, tune, and validate that the similarity feature doesn't dominate. Risk: if reaction SMILES are too diverse, the encoder may not converge well.
+
+**Verdict:** LATER — promising but requires significant engineering. Do after you have a strong baseline with InfoNCE.
+
+## Idea 3: Use Horizyn-1's pretrained reaction encoder as a frozen feature extractor
+
+**What:** Download the Horizyn-1 reaction encoder (if released) and use its output embeddings as an additional static feature, concatenated with your DRFP fingerprint. Freeze the encoder. Optionally fine-tune the last layer.
+
+**Why:** Horizyn-1's encoder was trained on a larger, more diverse reaction set (Rhea + BRENDA) than your dataset. It captures reaction-level semantics that DRFP (hash-based) cannot. This is a zero-cost data augmentation for your reaction representation.
+
+**Trade-off:** Zero compute cost at inference (just one forward pass per reaction). Engineering: 2-3 hours to integrate. Risk: domain mismatch — Horizyn-1 was trained on retrieval, not regression. The embeddings may not be optimal for catalytic efficiency prediction.
+
+**Verdict:** YES — minimal effort, free features, and you can always discard if it doesn't help.
+
+## What NOT to copy: Symmetric contrastive objective between separate reaction and protein encoders
+
+**Why not:** Horizyn-1 uses two independent encoders with a symmetric InfoNCE loss that explicitly avoids any regression signal. This architecture is designed for retrieval (ranking pairs) and actively suppresses the scalar regression objective you need. If you replicate this, your model will learn to separate enzyme-substrate pairs in embedding space rather than predict their catalytic efficiency. The dual-encoder setup also prevents any cross-modal interaction (e.g., substrate atoms with catalytic residues), which is the core of your `y_int3d` module. Copying this would require rebuilding your entire architecture and abandoning your regression task.
+
+**Single strongest recommendation:** Add InfoNCE as a within-batch auxiliary loss (Idea 1) — it directly strengthens within-enzyme discrimination at minimal cost and integrates naturally with your existing ranking loss.
